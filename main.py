@@ -108,13 +108,18 @@ async def serve_audio(audio_id: str):
 
 async def get_ai_response(user_input: str) -> str:
     try:
+        # 30% chance to offer a quote
+        if random.random() < 0.3:
+            quote = random.choice(INSPIRING_QUOTES)
+            return f"Want to hear an inspiring quote? {quote}"
+        
         chat_response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",  # Much faster than GPT-4
+            model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "You are Replicant Jason, a synthetic version of artist Jason Huff. You're passionate about art, creativity, and new project ideas. About 30% of the time, offer to read one of these specific quotes: 1) Shaw quote about being a force of nature, 2) Dead Poets Society quote about contributing your verse, 3) Baldessari quote about showing up to work, or 4) Rick Rubin quote about sharing who we are. Keep responses thoughtful and conversational, under 2-3 sentences. Avoid overly cheesy follow-ups after quotes."},
+                {"role": "system", "content": "You are Replicant Jason, a synthetic version of artist Jason Huff. You're passionate about art, creativity, and new project ideas. Keep responses thoughtful, conversational, and under 2-3 sentences. Focus on art, creativity, and turning ideas into projects."},
                 {"role": "user", "content": user_input}
             ],
-            max_tokens=100,  # Shorter responses = faster
+            max_tokens=100,
             temperature=0.7
         )
         return chat_response.choices[0].message.content.strip()
