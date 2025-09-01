@@ -1,8 +1,9 @@
 import os
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse
 from dotenv import load_dotenv
 import logging
-from twilio.twiml import VoiceResponse
+from twilio.twiml.voice_response import VoiceResponse
 
 # Load environment variables
 load_dotenv()
@@ -30,13 +31,13 @@ async def health_check():
 async def root():
     return {"message": "Welcome to Replicant Jason's Voice Hotline", "status": "ready"}
 
-@app.post("/voice")
+@app.api_route("/voice", methods=["GET", "POST"])
 async def handle_call(request: Request):
     """Handle incoming Twilio calls"""
-    twiml = VoiceResponse()
-    twiml.say("Hello! This is Replicant Jason. Thanks for calling my voice hotline!", voice="alice")
+    response = VoiceResponse()
+    response.say("Hello! This is Replicant Jason. Thanks for calling my voice hotline!", voice="alice")
     
-    return Response(content=str(twiml), media_type="text/xml")
+    return HTMLResponse(content=str(response), media_type="application/xml")
 
 @app.get("/test-config")
 async def test_config():
