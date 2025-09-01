@@ -32,9 +32,9 @@ async def root():
 
 @app.post("/voice")
 async def handle_call(request: Request):
-    """Handle incoming Twilio calls - will be implemented with proper Vocode integration"""
+    """Handle incoming Twilio calls"""
     twiml = VoiceResponse()
-    twiml.say("Hello! This is a test version of Replicant Jason. Full voice functionality coming soon!")
+    twiml.say("Hello! This is Replicant Jason. Thanks for calling my voice hotline!", voice="alice")
     
     return Response(content=str(twiml), media_type="text/xml")
 
