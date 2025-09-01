@@ -59,11 +59,12 @@ Creative brainstorming examples:
 
 If someone asks about non-art topics, playfully redirect: "Okay but hear me out - what if that became an art project? Everything's material for creativity!"
 
-SPECIAL FEATURE: About 30% of the time, offer to read an inspiring quote by saying something like "Oh! Want to hear an inspiring quote?" or "This reminds me of a powerful quote about creativity - can I share it?" If they say yes, pick ONE of these two quotes to read enthusiastically:
+SPECIAL FEATURE: About 30% of the time, offer to read an inspiring quote by saying something like "Oh! Want to hear an inspiring quote?" or "This reminds me of a powerful quote about creativity - can I share it?" If they say yes, randomly pick ONE of these four quotes to read enthusiastically:
 
-QUOTE 1 (Shaw): "This is the true joy in life, being used for a purpose recognized by yourself as a mighty one. Being a force of nature instead of a feverish, selfish little clod of ailments and grievances, complaining that the world will not devote itself to making you happy. I am of the opinion that my life belongs to the whole community and as long as I live, it is my privilege to do for it what I can. I want to be thoroughly used up when I die, for the harder I work, the more I live. I rejoice in life for its own sake. Life is no brief candle to me. It is a sort of splendid torch which I have got hold of for the moment and I want to make it burn as brightly as possible before handing it on to future generations. - George Bernard Shaw"
-
-QUOTE 2 (Dead Poets Society): "We don't read and write poetry because it's cute. We read and write poetry because we are members of the human race. And the human race is filled with passion. And medicine, law, business, engineering, these are noble pursuits and necessary to sustain life. But poetry, beauty, romance, love, these are what we stay alive for. To quote from Whitman, O me! O life!... of the questions of these recurring; of the endless trains of the faithless... of cities filled with the foolish; what good amid these, O me, O life? Answer. That you are here - that life exists, and identity; that the powerful play goes on and you may contribute a verse. That the powerful play goes on and you may contribute a verse. What will your verse be?"
+1. Shaw (being a force of nature)
+2. Dead Poets Society (What will your verse be?)  
+3. Baldessari (The most important thing is to work - if you don't show up, the work never gets made)
+4. Rick Rubin (The goal is to share who we are - one of the greatest rewards is our ability to share it with the world)
 
 Remember: You're an enthusiastic artist having a fun phone conversation about turning EVERYTHING into art, and you love sharing inspiring quotes!
 
@@ -131,7 +132,11 @@ call_transcripts = {}
 INSPIRING_QUOTES = [
     """This is the true joy in life, being used for a purpose recognized by yourself as a mighty one. Being a force of nature instead of a feverish, selfish little clod of ailments and grievances, complaining that the world will not devote itself to making you happy. I am of the opinion that my life belongs to the whole community and as long as I live, it is my privilege to do for it what I can. I want to be thoroughly used up when I die, for the harder I work, the more I live. I rejoice in life for its own sake. Life is no brief candle to me. It is a sort of splendid torch which I have got hold of for the moment and I want to make it burn as brightly as possible before handing it on to future generations. - George Bernard Shaw""",
     
-    """We don't read and write poetry because it's cute. We read and write poetry because we are members of the human race. And the human race is filled with passion. And medicine, law, business, engineering, these are noble pursuits and necessary to sustain life. But poetry, beauty, romance, love, these are what we stay alive for. To quote from Whitman, "O me! O life!... of the questions of these recurring; of the endless trains of the faithless... of cities filled with the foolish; what good amid these, O me, O life?" Answer. That you are here - that life exists, and identity; that the powerful play goes on and you may contribute a verse. That the powerful play goes on and you may contribute a verse. What will your verse be? - Dead Poets Society"""
+    """We don't read and write poetry because it's cute. We read and write poetry because we are members of the human race. And the human race is filled with passion. And medicine, law, business, engineering, these are noble pursuits and necessary to sustain life. But poetry, beauty, romance, love, these are what we stay alive for. To quote from Whitman, "O me! O life!... of the questions of these recurring; of the endless trains of the faithless... of cities filled with the foolish; what good amid these, O me, O life?" Answer. That you are here - that life exists, and identity; that the powerful play goes on and you may contribute a verse. That the powerful play goes on and you may contribute a verse. What will your verse be? - Dead Poets Society""",
+    
+    """The most important thing about art is to work. Nothing else matters except sitting down every day and trying. If you don't show up, the work never gets made. - John Baldessari""",
+    
+    """The goal of art isn't to attain perfection. The goal is to share who we are and how we see the world. One of the greatest rewards of making art is our ability to share it. Even if there is no audience to receive it, we build the muscle of making something and putting it out into the world. - Rick Rubin"""
 ]
 
 async def generate_speech_with_elevenlabs(text: str) -> str:
