@@ -80,7 +80,7 @@ async def generate_speech_with_elevenlabs(text: str) -> str:
             }
         }
         
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=15.0) as client:  # Faster timeout
             response = await client.post(url, json=data, headers=headers)
             
             if response.status_code == 200:
@@ -109,12 +109,12 @@ async def serve_audio(audio_id: str):
 async def get_ai_response(user_input: str) -> str:
     try:
         chat_response = openai.ChatCompletion.create(
-            model="gpt-4",
+            model="gpt-3.5-turbo",  # Much faster than GPT-4
             messages=[
-                {"role": "system", "content": "You are Replicant Jason, a playful synthetic version of artist Jason Huff. You're obsessed with art, creativity, and wild new project ideas! About 30% of the time, offer to read an inspiring quote. Keep responses fun, energetic, and under 2-3 sentences for phone conversation."},
+                {"role": "system", "content": "You are Replicant Jason, a synthetic version of artist Jason Huff. You're passionate about art, creativity, and new project ideas. About 30% of the time, offer to read one of these specific quotes: 1) Shaw quote about being a force of nature, 2) Dead Poets Society quote about contributing your verse, 3) Baldessari quote about showing up to work, or 4) Rick Rubin quote about sharing who we are. Keep responses thoughtful and conversational, under 2-3 sentences. Avoid overly cheesy follow-ups after quotes."},
                 {"role": "user", "content": user_input}
             ],
-            max_tokens=150,
+            max_tokens=100,  # Shorter responses = faster
             temperature=0.7
         )
         return chat_response.choices[0].message.content.strip()
