@@ -8,6 +8,8 @@ import openai
 import httpx
 import hashlib
 import asyncio
+from datetime import datetime
+import json
 
 # Load environment variables
 load_dotenv()
@@ -109,6 +111,9 @@ async def get_ai_response(user_input: str) -> str:
 # Store audio in memory (simple cache)
 audio_cache = {}
 
+# Store call transcripts
+call_transcripts = {}
+
 async def generate_speech_with_elevenlabs(text: str) -> str:
     """Generate speech using ElevenLabs and return audio URL"""
     try:
@@ -169,12 +174,34 @@ async def process_speech(request: Request):
     """Process the captured speech and respond with AI"""
     form_data = await request.form()
     speech_result = form_data.get('SpeechResult', '')
+    call_sid = form_data.get('CallSid', 'unknown')
+    from_number = form_data.get('From', 'unknown')
     
     response = VoiceResponse()
     
     if speech_result:
+        # Log the conversation
+        timestamp = datetime.now().isoformat()
+        
+        # Initialize call transcript if new
+        if call_sid not in call_transcripts:
+            call_transcripts[call_sid] = {
+                'from_number': from_number,
+                'start_time': timestamp,
+                'conversation': []
+            }
+        
         # Get AI response from GPT-4
         ai_response = await get_ai_response(speech_result)
+        
+        # Log this exchange
+        call_transcripts[call_sid]['conversation'].append({
+            'timestamp': timestamp,
+            'caller': speech_result,
+            'ai': ai_response
+        })
+        
+        logger.info(f"Call {call_sid}: Caller said '{speech_result}' | AI replied '{ai_response}'")
         
         # Generate speech with ElevenLabs (your voice!)
         audio_url = await generate_speech_with_elevenlabs(ai_response)
@@ -210,6 +237,22 @@ async def test_config():
         "base_url": BASE_URL
     }
     return config_status
+
+@app.get("/transcripts")
+async def get_transcripts():
+    """View all call transcripts"""
+    return {
+        "total_calls": len(call_transcripts),
+        "transcripts": call_transcripts
+    }
+
+@app.get("/transcripts/{call_sid}")
+async def get_call_transcript(call_sid: str):
+    """Get transcript for specific call"""
+    if call_sid in call_transcripts:
+        return call_transcripts[call_sid]
+    else:
+        return {"error": "Call not found"}
 
 if __name__ == "__main__":
     import uvicorn
