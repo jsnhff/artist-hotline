@@ -2,6 +2,7 @@ import os
 from fastapi import FastAPI, Request, Response
 from dotenv import load_dotenv
 import logging
+from twilio.twiml import VoiceResponse
 
 # Load environment variables
 load_dotenv()
@@ -32,12 +33,10 @@ async def root():
 @app.post("/voice")
 async def handle_call(request: Request):
     """Handle incoming Twilio calls - will be implemented with proper Vocode integration"""
-    from twilio.twiml import VoiceResponse
-    
     twiml = VoiceResponse()
     twiml.say("Hello! This is a test version of Replicant Jason. Full voice functionality coming soon!")
     
-    return Response(content=str(twiml), media_type="application/xml")
+    return Response(content=str(twiml), media_type="text/xml")
 
 @app.get("/test-config")
 async def test_config():
