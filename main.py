@@ -35,7 +35,46 @@ async def root():
 async def handle_call(request: Request):
     """Handle incoming Twilio calls"""
     response = VoiceResponse()
-    response.say("Hello! This is Replicant Jason. Thanks for calling my voice hotline!", voice="alice")
+    response.say("Hello! This is Replicant Jason. Thanks for calling my voice hotline! Go ahead and speak, I'm listening.", voice="alice")
+    
+    # Use Gather to capture speech input
+    gather = response.gather(
+        input='speech',
+        action='/process-speech',
+        method='POST',
+        speech_timeout=3,
+        timeout=10
+    )
+    
+    # Fallback if no input
+    response.say("I didn't hear anything. Goodbye!", voice="alice")
+    response.hangup()
+    
+    return HTMLResponse(content=str(response), media_type="application/xml")
+
+@app.api_route("/process-speech", methods=["POST"])
+async def process_speech(request: Request):
+    """Process the captured speech and respond"""
+    form_data = await request.form()
+    speech_result = form_data.get('SpeechResult', '')
+    
+    response = VoiceResponse()
+    
+    if speech_result:
+        # For now, just echo back what they said
+        response.say(f"I heard you say: {speech_result}. That's interesting! Tell me more.", voice="alice")
+        
+        # Gather more input for continuous conversation
+        gather = response.gather(
+            input='speech',
+            action='/process-speech',
+            method='POST',
+            speech_timeout=3,
+            timeout=10
+        )
+    else:
+        response.say("I couldn't understand what you said. Thanks for calling!", voice="alice")
+        response.hangup()
     
     return HTMLResponse(content=str(response), media_type="application/xml")
 
