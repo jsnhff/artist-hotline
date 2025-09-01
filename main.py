@@ -108,8 +108,8 @@ async def serve_audio(audio_id: str):
 
 async def get_ai_response(user_input: str) -> str:
     try:
-        # 30% chance to offer a quote
-        if random.random() < 0.3:
+        # 15% chance to offer a quote
+        if random.random() < 0.15:
             quote = random.choice(INSPIRING_QUOTES)
             return f"Want to hear an inspiring quote? {quote}"
         
@@ -147,7 +147,11 @@ async def handle_call(request: Request):
         timeout=10
     )
     
-    response.say("I didn't hear anything. Goodbye!", voice="man")
+    timeout_audio_url = await generate_speech_with_elevenlabs("I didn't catch that. Talk to you later!")
+    if timeout_audio_url:
+        response.play(timeout_audio_url)
+    else:
+        response.say("I didn't catch that. Talk to you later!", voice="man")
     response.hangup()
     
     return HTMLResponse(content=str(response), media_type="application/xml")
@@ -196,7 +200,11 @@ async def process_speech(request: Request):
             timeout=10
         )
     else:
-        response.say("I couldn't understand what you said. Thanks for calling!", voice="man")
+        timeout_audio_url = await generate_speech_with_elevenlabs("I couldn't catch what you said. Talk to you later!")
+        if timeout_audio_url:
+            response.play(timeout_audio_url)
+        else:
+            response.say("I couldn't catch what you said. Talk to you later!", voice="man")
         response.hangup()
     
     return HTMLResponse(content=str(response), media_type="application/xml")
