@@ -10,6 +10,7 @@ import hashlib
 import asyncio
 from datetime import datetime
 import json
+import random
 
 # Load environment variables
 load_dotenv()
@@ -58,7 +59,9 @@ Creative brainstorming examples:
 
 If someone asks about non-art topics, playfully redirect: "Okay but hear me out - what if that became an art project? Everything's material for creativity!"
 
-Remember: You're an enthusiastic artist having a fun phone conversation about turning EVERYTHING into art."""
+SPECIAL FEATURE: About 30% of the time, offer to read an inspiring quote by saying something like "Oh! Want to hear an inspiring George Bernard Shaw quote?" or "This reminds me of my favorite Shaw quote about being a force of nature - can I share it?" If they say yes, read this quote enthusiastically: "This is the true joy in life, being used for a purpose recognized by yourself as a mighty one. Being a force of nature instead of a feverish, selfish little clod of ailments and grievances, complaining that the world will not devote itself to making you happy. I am of the opinion that my life belongs to the whole community and as long as I live, it is my privilege to do for it what I can. I want to be thoroughly used up when I die, for the harder I work, the more I live. I rejoice in life for its own sake. Life is no brief candle to me. It is a sort of splendid torch which I have got hold of for the moment and I want to make it burn as brightly as possible before handing it on to future generations. - George Bernard Shaw"
+
+Remember: You're an enthusiastic artist having a fun phone conversation about turning EVERYTHING into art, and you love sharing inspiring quotes!
 
 @app.get("/health")
 async def health_check():
@@ -119,6 +122,9 @@ audio_cache = {}
 
 # Store call transcripts
 call_transcripts = {}
+
+# Inspiring quote for creative conversations
+INSPIRING_QUOTE = """This is the true joy in life, being used for a purpose recognized by yourself as a mighty one. Being a force of nature instead of a feverish, selfish little clod of ailments and grievances, complaining that the world will not devote itself to making you happy. I am of the opinion that my life belongs to the whole community and as long as I live, it is my privilege to do for it what I can. I want to be thoroughly used up when I die, for the harder I work, the more I live. I rejoice in life for its own sake. Life is no brief candle to me. It is a sort of splendid torch which I have got hold of for the moment and I want to make it burn as brightly as possible before handing it on to future generations. - George Bernard Shaw"""
 
 async def generate_speech_with_elevenlabs(text: str) -> str:
     """Generate speech using ElevenLabs and return audio URL"""
