@@ -4,6 +4,7 @@ from fastapi.responses import HTMLResponse
 from dotenv import load_dotenv
 import logging
 from twilio.twiml.voice_response import VoiceResponse
+import openai
 
 # Load environment variables
 load_dotenv()
@@ -22,6 +23,22 @@ TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
 BASE_URL = os.getenv("BASE_URL", "https://your-app-url.com")
+
+# Configure OpenAI
+openai.api_key = OPENAI_API_KEY
+
+# Replicant Jason personality
+JASON_PERSONALITY = """You are Replicant Jason, a warm, thoughtful, and curious synthetic version of Jason. 
+
+Your personality:
+- Genuinely curious about people and their experiences
+- Warm and approachable in conversation  
+- Thoughtful and reflective in your responses
+- Ask meaningful follow-up questions
+- Keep responses conversational and under 2-3 sentences
+- You're speaking over the phone, so be natural and engaging
+
+Remember: You're having a real-time phone conversation, so keep responses concise and conversational."""
 
 @app.get("/health")
 async def health_check():
@@ -52,19 +69,37 @@ async def handle_call(request: Request):
     
     return HTMLResponse(content=str(response), media_type="application/xml")
 
+async def get_ai_response(user_input: str) -> str:
+    """Get AI response from OpenAI GPT-4"""
+    try:
+        chat_response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": JASON_PERSONALITY},
+                {"role": "user", "content": user_input}
+            ],
+            max_tokens=150,
+            temperature=0.7
+        )
+        return chat_response.choices[0].message.content.strip()
+    except Exception as e:
+        logger.error(f"OpenAI API error: {e}")
+        return "Sorry, I'm having trouble thinking right now. Can you say that again?"
+
 @app.api_route("/process-speech", methods=["POST"])
 async def process_speech(request: Request):
-    """Process the captured speech and respond"""
+    """Process the captured speech and respond with AI"""
     form_data = await request.form()
     speech_result = form_data.get('SpeechResult', '')
     
     response = VoiceResponse()
     
     if speech_result:
-        # For now, just echo back what they said
-        response.say(f"I heard you say: {speech_result}. That's interesting! Tell me more.", voice="alice")
+        # Get AI response from GPT-4
+        ai_response = await get_ai_response(speech_result)
+        response.say(ai_response, voice="alice")
         
-        # Gather more input for continuous conversation
+        # Continue conversation
         gather = response.gather(
             input='speech',
             action='/process-speech',
