@@ -1,0 +1,2 @@
+vocode==0.1.108
+python-dotenv
