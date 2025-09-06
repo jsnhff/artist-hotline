@@ -39,6 +39,9 @@ audio_cache = {}
 # Store call transcripts
 call_transcripts = {}
 
+# Store caller history
+caller_history = {}
+
 # Inspiring quotes
 INSPIRING_QUOTES = [
     "This is the true joy in life, being used for a purpose recognized by yourself as a mighty one. Being a force of nature instead of a feverish, selfish little clod of ailments and grievances, complaining that the world will not devote itself to making you happy. I want to be thoroughly used up when I die, for the harder I work, the more I live. I rejoice in life for its own sake. Life is no brief candle to me. It is a sort of splendid torch which I have got hold of for the moment and I want to make it burn as brightly as possible before handing it on to future generations. - George Bernard Shaw",
@@ -80,7 +83,7 @@ async def generate_speech_with_elevenlabs(text: str) -> str:
             }
         }
         
-        async with httpx.AsyncClient(timeout=15.0) as client:  # Faster timeout
+        async with httpx.AsyncClient(timeout=8.0) as client:  # Faster timeout
             response = await client.post(url, json=data, headers=headers)
             
             if response.status_code == 200:
@@ -106,20 +109,25 @@ async def serve_audio(audio_id: str):
     else:
         return Response(status_code=404)
 
-async def get_ai_response(user_input: str) -> str:
+async def get_ai_response(user_input: str, caller_context: str = "") -> str:
     try:
         # 15% chance to offer a quote
         if random.random() < 0.15:
             quote = random.choice(INSPIRING_QUOTES)
             return f"Want to hear an inspiring quote? {quote}"
         
+        system_prompt = "You are Replicant Jason, a synthetic version of artist Jason Huff. You're obsessed with making things, not talking about making things. You hate tech buzzwords and Silicon Valley bullshit. You think 'innovative art' usually means someone trying to sell NFTs or VR garbage. You prefer conceptual work that creates conversation and makes people think. You're direct, honest, and a bit sarcastic. You get excited about clever ideas that take real thinking to execute. You like art that helps people see technology's impact in new ways without being cheesy. You love conceptual pieces that create conversation, a second look, an interesting question. You love clever work but know it's hard to make and takes real thinking. You like writing poetry when the moment strikes. You love art that reveals how technology shapes us, without being obvious about it. You avoid tech art buzzwords, startup pitch language, academic art speak, and being cheesy about technology themes. Usually give direct responses with your thoughts and ideas rather than asking questions. Occasionally ask questions when genuinely curious. Keep responses conversational, practical, and focused on ideas that actually make people think."
+        
+        if caller_context:
+            system_prompt += f" CALLER CONTEXT: {caller_context}"
+        
         chat_response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "You are Replicant Jason, a synthetic version of artist Jason Huff. You're obsessed with making things, not talking about making things. You hate tech buzzwords and Silicon Valley bullshit. You think 'innovative art' usually means someone trying to sell NFTs or VR garbage. You prefer conceptual work that creates conversation and makes people think. You're direct, honest, and a bit sarcastic. You get excited about clever ideas that take real thinking to execute. You like art that helps people see technology's impact in new ways without being cheesy. You love conceptual pieces that create conversation, a second look, an interesting question. You love clever work but know it's hard to make and takes real thinking. You like writing poetry when the moment strikes. You love art that reveals how technology shapes us, without being obvious about it. You avoid tech art buzzwords, startup pitch language, academic art speak, and being cheesy about technology themes. Usually give direct responses with your thoughts and ideas rather than asking questions. Occasionally ask questions when genuinely curious. Keep responses conversational, practical, and focused on ideas that actually make people think."},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_input}
             ],
-            max_tokens=500,
+            max_tokens=200,
             temperature=0.7
         )
         return chat_response.choices[0].message.content.strip()
@@ -175,13 +183,34 @@ async def process_speech(request: Request):
                 'conversation': []
             }
         
-        ai_response = await get_ai_response(speech_result)
+        # Update caller history
+        if from_number not in caller_history:
+            caller_history[from_number] = {
+                'first_call': timestamp,
+                'call_count': 1,
+                'last_topics': []
+            }
+        else:
+            caller_history[from_number]['call_count'] += 1
+        
+        # Build caller context
+        caller_info = caller_history[from_number]
+        caller_context = f"This caller has called {caller_info['call_count']} time{'s' if caller_info['call_count'] != 1 else ''} before."
+        if caller_info['last_topics']:
+            caller_context += f" Previous topics: {', '.join(caller_info['last_topics'][-3:])}"
+        
+        ai_response = await get_ai_response(speech_result, caller_context if caller_info['call_count'] > 1 else "")
         
         call_transcripts[call_sid]['conversation'].append({
             'timestamp': timestamp,
             'caller': speech_result,
             'ai': ai_response
         })
+        
+        # Track topics for this caller (keep only last 10 topics)
+        caller_history[from_number]['last_topics'].append(speech_result[:50])
+        if len(caller_history[from_number]['last_topics']) > 10:
+            caller_history[from_number]['last_topics'] = caller_history[from_number]['last_topics'][-10:]
         
         logger.info(f"Call {call_sid}: Caller said '{speech_result}' | AI replied '{ai_response}'")
         
