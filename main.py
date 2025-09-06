@@ -137,9 +137,25 @@ async def get_ai_response(user_input: str, caller_context: str = "") -> str:
 
 @app.api_route("/voice", methods=["GET", "POST"])
 async def handle_call(request: Request):
+    form_data = await request.form()
+    from_number = form_data.get('From', 'unknown')
+    
     response = VoiceResponse()
     
-    greeting_text = "Hey! This is Synthetic Jason - I'm basically Jason Huff but weirder and more obsessed with art! Fair warning, I'm going to try to turn everything into a creative project, and yeah, this call gets logged. So what wild idea should we dream up together?"
+    # Check if this is a returning caller
+    if from_number in caller_history:
+        caller_info = caller_history[from_number]
+        call_count = caller_info['call_count'] + 1  # Will be incremented later
+        recent_topics = caller_info['last_topics'][-2:] if caller_info['last_topics'] else []
+        
+        if recent_topics:
+            topics_text = " and ".join(recent_topics)
+            greeting_text = f"Hey, welcome back! This is Synthetic Jason again - I remember we talked about {topics_text}. Just a reminder, I'm the AI version of Jason Huff and this call gets logged. Do you want to pick up where we left off, or explore something totally new?"
+        else:
+            greeting_text = f"Hey, welcome back! This is Synthetic Jason - I remember you called before. Just a reminder, I'm the AI version of Jason Huff and this call gets logged. What's on your mind today?"
+    else:
+        greeting_text = "Hey! This is Synthetic Jason - I'm basically Jason Huff but weirder and more obsessed with art! Fair warning, I'm going to try to turn everything into a creative project, and yeah, this call gets logged. So what wild idea should we dream up together?"
+    
     greeting_audio_url = await generate_speech_with_elevenlabs(greeting_text)
     
     if greeting_audio_url:
