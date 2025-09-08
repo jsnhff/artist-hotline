@@ -4,6 +4,7 @@ from fastapi.responses import HTMLResponse, Response
 from dotenv import load_dotenv
 import logging
 from twilio.twiml.voice_response import VoiceResponse
+from twilio.rest import Client
 import openai
 import httpx
 import hashlib
@@ -28,10 +29,14 @@ ELEVEN_LABS_VOICE_ID = os.getenv("ELEVEN_LABS_VOICE_ID")
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
+YOUR_PHONE_NUMBER = os.getenv("YOUR_PHONE_NUMBER")
 BASE_URL = os.getenv("BASE_URL", "https://your-app-url.com")
 
 # Configure OpenAI
 openai.api_key = OPENAI_API_KEY
+
+# Initialize Twilio client
+twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 
 # Store audio in memory (simple cache)
 audio_cache = {}
@@ -109,6 +114,86 @@ async def serve_audio(audio_id: str):
     else:
         return Response(status_code=404)
 
+async def generate_call_summary(conversation: list) -> str:
+    try:
+        if not conversation:
+            return "No conversation recorded"
+        
+        conversation_text = ""
+        for exchange in conversation:
+            conversation_text += f"Caller: {exchange['caller']}\nAI: {exchange['ai']}\n\n"
+        
+        summary_response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Summarize this phone conversation between a caller and Replicant Jason (an AI version of artist Jason Huff) in 1-2 sentences. Focus on the main topics discussed and any interesting ideas or projects mentioned."},
+                {"role": "user", "content": conversation_text}
+            ],
+            max_tokens=100,
+            temperature=0.3
+        )
+        
+        return summary_response.choices[0].message.content.strip()
+    except Exception as e:
+        logger.error(f"Failed to generate call summary: {e}")
+        return "Summary unavailable"
+
+async def send_sms_notification(caller_number: str, is_returning: bool = False, topics: list = []) -> bool:
+    try:
+        if not YOUR_PHONE_NUMBER:
+            logger.warning("YOUR_PHONE_NUMBER not configured - skipping SMS notification")
+            return False
+            
+        timestamp = datetime.now().strftime("%I:%M %p")
+        
+        if is_returning and topics:
+            recent_topics = ", ".join(topics[-2:])
+            message = f"📞 Replicant Jason call at {timestamp}\nReturning caller: {caller_number}\nPrevious topics: {recent_topics}"
+        elif is_returning:
+            message = f"📞 Replicant Jason call at {timestamp}\nReturning caller: {caller_number}"
+        else:
+            message = f"📞 Replicant Jason call at {timestamp}\nNew caller: {caller_number}"
+        
+        twilio_client.messages.create(
+            body=message,
+            from_=TWILIO_PHONE_NUMBER,
+            to=YOUR_PHONE_NUMBER
+        )
+        
+        logger.info(f"SMS notification sent for call from {caller_number}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Failed to send SMS notification: {e}")
+        return False
+
+async def send_call_summary_sms(caller_number: str, call_sid: str) -> bool:
+    try:
+        if not YOUR_PHONE_NUMBER or call_sid not in call_transcripts:
+            return False
+        
+        conversation = call_transcripts[call_sid]['conversation']
+        if not conversation:
+            return False
+        
+        summary = await generate_call_summary(conversation)
+        timestamp = datetime.now().strftime("%I:%M %p")
+        
+        message = f"📋 Call Summary ({timestamp})\nCaller: {caller_number}\n\n{summary}"
+        
+        twilio_client.messages.create(
+            body=message,
+            from_=TWILIO_PHONE_NUMBER,
+            to=YOUR_PHONE_NUMBER
+        )
+        
+        logger.info(f"Call summary SMS sent for {caller_number}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Failed to send call summary SMS: {e}")
+        return False
+
 async def get_ai_response(user_input: str, caller_context: str = "") -> str:
     try:
         # 15% chance to offer a quote
@@ -143,6 +228,12 @@ async def handle_call(request: Request):
     response = VoiceResponse()
     
     # Check if this is a returning caller
+    is_returning = from_number in caller_history
+    topics = caller_history.get(from_number, {}).get('last_topics', []) if is_returning else []
+    
+    # Send SMS notification
+    await send_sms_notification(from_number, is_returning, topics)
+    
     if from_number in caller_history:
         caller_info = caller_history[from_number]
         call_count = caller_info['call_count'] + 1  # Will be incremented later
@@ -245,6 +336,10 @@ async def process_speech(request: Request):
             timeout=10
         )
     else:
+        # Send call summary before hanging up if we have a conversation
+        if call_sid in call_transcripts and call_transcripts[call_sid]['conversation']:
+            await send_call_summary_sms(from_number, call_sid)
+        
         timeout_audio_url = await generate_speech_with_elevenlabs("I couldn't catch what you said. Talk to you later!")
         if timeout_audio_url:
             response.play(timeout_audio_url)
@@ -267,6 +362,23 @@ async def get_call_transcript(call_sid: str):
         return call_transcripts[call_sid]
     else:
         return {"error": "Call not found"}
+
+@app.api_route("/call-status", methods=["POST"])
+async def handle_call_status(request: Request):
+    form_data = await request.form()
+    call_status = form_data.get('CallStatus', '')
+    call_sid = form_data.get('CallSid', '')
+    from_number = form_data.get('From', 'unknown')
+    
+    logger.info(f"Call status update: {call_sid} - {call_status}")
+    
+    # Send summary when call ends
+    if call_status == 'completed' and call_sid in call_transcripts:
+        conversation = call_transcripts[call_sid]['conversation']
+        if conversation:  # Only send summary if there was actual conversation
+            await send_call_summary_sms(from_number, call_sid)
+    
+    return {"status": "received"}
 
 if __name__ == "__main__":
     import uvicorn

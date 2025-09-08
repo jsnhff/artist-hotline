@@ -108,7 +108,8 @@ Once deployed, configure your Twilio phone number:
 2. Click on your phone number
 3. Set the webhook URL to: `https://your-app-url.com/voice`
 4. Set HTTP method to `POST`
-5. Save the configuration
+5. Set the status callback URL to: `https://your-app-url.com/call-status` (for call summaries)
+6. Save the configuration
 
 ## Usage
 
