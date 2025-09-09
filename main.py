@@ -79,16 +79,17 @@ async def generate_speech_with_elevenlabs(text: str) -> str:
         
         data = {
             "text": text,
-            "model_id": "eleven_turbo_v2",
+            "model_id": "eleven_turbo_v2_5",
             "voice_settings": {
-                "stability": 0.4,
+                "stability": 0.3,
                 "similarity_boost": 0.75,
                 "style": 0.0,
                 "use_speaker_boost": True
-            }
+            },
+            "optimize_streaming_latency": 1
         }
         
-        async with httpx.AsyncClient(timeout=8.0) as client:  # Faster timeout
+        async with httpx.AsyncClient(timeout=3.0) as client:  # Optimized for speed
             response = await client.post(url, json=data, headers=headers)
             
             if response.status_code == 200:
@@ -207,7 +208,7 @@ async def get_ai_response(user_input: str, caller_context: str = "") -> str:
             system_prompt += f" CALLER CONTEXT: {caller_context}"
         
         chat_response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
+            model="gpt-3.5-turbo-1106",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_input}
