@@ -760,6 +760,9 @@ async def handle_media_stream(websocket: WebSocket):
         # Add fallback mechanism - if streaming fails, we can fallback to traditional approach
         fallback_triggered = False
         
+        # Track if we've sent the initial greeting
+        greeting_sent = False
+        
         while True:
             message = await websocket.receive_text()
             data = json.loads(message)
@@ -789,12 +792,28 @@ async def handle_media_stream(websocket: WebSocket):
                     fallback_triggered = True
                 
             elif data['event'] == 'media':
+                # Extract stream_sid from media event if we don't have it
+                if not stream_sid:
+                    stream_sid = data.get('streamSid')
+                    logger.info(f"🔍 Extracted stream_sid from media event: {stream_sid}")
+                
+                # If we haven't sent greeting yet and we're receiving media, send it now
+                if not greeting_sent and stream_sid:
+                    logger.info("📨 Sending initial greeting on first media event")
+                    greeting_text = "Hey! This is Synthetic Jason speaking in real-time! I can hear you clearly and respond instantly. What's on your mind?"
+                    try:
+                        await stream_speech_to_twilio(greeting_text, websocket, stream_sid)
+                        greeting_sent = True
+                        logger.info("✅ Initial greeting sent successfully")
+                    except Exception as greeting_error:
+                        logger.error(f"❌ Failed to send initial greeting: {greeting_error}")
+                
                 # Receive μ-law audio from Twilio (8kHz, base64)
                 audio_payload = data['media']['payload']
                 audio_chunk = base64.b64decode(audio_payload)
                 
                 # Initialize audio buffer for this stream if needed
-                if stream_sid not in audio_buffers:
+                if stream_sid and stream_sid not in audio_buffers:
                     audio_buffers[stream_sid] = AudioBuffer()
                 
                 # Add chunk to buffer
@@ -807,7 +826,7 @@ async def handle_media_stream(websocket: WebSocket):
                     logger.info(f"Processing audio buffer: {len(audio_data)} bytes")
                     
                     # Simple test response to verify pipeline
-                    if len(audio_data) > 2000 and not hasattr(buffer, 'last_response_time'):
+                    if len(audio_data) > 1000 and not hasattr(buffer, 'last_response_time'):
                         logger.info("Audio detected - sending test response")
                         
                         # Generate simple test response
