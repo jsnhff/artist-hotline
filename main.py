@@ -242,16 +242,17 @@ async def stream_speech_to_twilio(text: str, twilio_websocket: WebSocket, stream
                 data = json.loads(message)
                 
                 if data.get("audio"):
-                    # Send audio chunk directly to Twilio
+                    # ElevenLabs sends base64 encoded audio, but we need to check format
+                    # For now, let's try sending it directly and see what happens
                     media_message = {
                         "event": "media",
                         "streamSid": stream_sid,
                         "media": {
-                            "payload": data["audio"]  # Already base64 encoded
+                            "payload": data["audio"]  # ElevenLabs base64 audio
                         }
                     }
                     await twilio_websocket.send_text(json.dumps(media_message))
-                    logger.debug(f"Sent audio chunk to Twilio for stream {stream_sid}")
+                    logger.debug(f"Sent audio chunk to Twilio: {len(data['audio'])} base64 chars")
                 
                 if data.get("isFinal"):
                     logger.info(f"Finished streaming audio for text: {text[:50]}...")
@@ -650,7 +651,7 @@ async def handle_media_stream(websocket: WebSocket):
                 # Now properly connect to the manager with the real stream_sid
                 manager.active_connections.append(websocket)
                 
-                # Send initial greeting via streaming
+                # Send initial greeting via streaming  
                 greeting_text = "Hey! This is Synthetic Jason speaking in real-time! I can hear you clearly and respond instantly. What's on your mind?"
                 await stream_speech_to_twilio(greeting_text, websocket, stream_sid)
                 
@@ -670,27 +671,17 @@ async def handle_media_stream(websocket: WebSocket):
                 # Check if we should process accumulated audio
                 if buffer.should_process():
                     audio_data = buffer.get_audio_data()
+                    logger.info(f"Processing audio buffer: {len(audio_data)} bytes")
                     
-                    # Transcribe accumulated audio
-                    transcription = await transcribe_audio_buffer(audio_data)
-                    
-                    if transcription and transcription.strip():
-                        logger.info(f"Transcribed: {transcription}")
+                    # For now, respond to any audio activity to test the pipeline
+                    if len(audio_data) > 500:  # If we detect substantial audio
+                        logger.info("Audio detected - sending test response")
                         
-                        # Generate AI response
-                        ai_response = await get_ai_response(transcription)
+                        # Generate simple test response
+                        test_response = "I heard you! This is a test of real-time audio streaming."
                         
-                        # Record conversation if we have call_sid
-                        if call_sid and call_sid in call_transcripts:
-                            timestamp = datetime.now().isoformat()
-                            call_transcripts[call_sid]['conversation'].append({
-                                'timestamp': timestamp,
-                                'caller': transcription,
-                                'ai': ai_response
-                            })
-                        
-                        # Stream AI response back
-                        await stream_speech_to_twilio(ai_response, websocket, stream_sid)
+                        # Stream test response back
+                        await stream_speech_to_twilio(test_response, websocket, stream_sid)
                         
                         # Clear buffer after processing
                         buffer.clear()
