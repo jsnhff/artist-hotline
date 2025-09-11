@@ -73,6 +73,18 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 # Inspiring quotes
+# Quick acknowledgment responses (instant, while thinking)
+QUICK_RESPONSES = [
+    "Hmm, let me think about that.",
+    "Interesting, okay.",
+    "Alright, hold on.",
+    "Yeah, let me process that.",
+    "Hmm, good question.",
+    "Right, I hear you.",
+    "Okay, give me a sec.",
+    "Mm-hmm, thinking.",
+]
+
 INSPIRING_QUOTES = [
     "This is the true joy in life, being used for a purpose recognized by yourself as a mighty one. Being a force of nature instead of a feverish, selfish little clod of ailments and grievances, complaining that the world will not devote itself to making you happy. I want to be thoroughly used up when I die, for the harder I work, the more I live. I rejoice in life for its own sake. Life is no brief candle to me. It is a sort of splendid torch which I have got hold of for the moment and I want to make it burn as brightly as possible before handing it on to future generations. - George Bernard Shaw",
     
@@ -539,12 +551,12 @@ async def get_ai_response(user_input: str, caller_context: str = "") -> str:
             system_prompt += f" CALLER CONTEXT: {caller_context}"
         
         chat_response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo-1106",
+            model="gpt-4o-mini",  # Faster than gpt-3.5-turbo-1106
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_input}
             ],
-            max_tokens=200,
+            max_tokens=150,  # Shorter for speed
             temperature=0.7
         )
         return chat_response.choices[0].message.content.strip()
@@ -672,12 +684,22 @@ async def process_speech(request: Request):
         if caller_info['last_topics']:
             caller_context += f" Previous topics: {', '.join(caller_info['last_topics'][-3:])}"
         
+        # Send quick acknowledgment first (instant response)
+        quick_response = random.choice(QUICK_RESPONSES)
+        quick_audio_url = await generate_speech(quick_response)
+        
+        if quick_audio_url:
+            response.play(quick_audio_url)
+        else:
+            response.say(quick_response, voice="man")
+            
+        # Then generate full AI response (while user hears the acknowledgment)
         ai_response = await get_ai_response(speech_result, caller_context if caller_info['call_count'] > 1 else "")
         
         call_transcripts[call_sid]['conversation'].append({
             'timestamp': timestamp,
             'caller': speech_result,
-            'ai': ai_response
+            'ai': f"{quick_response} {ai_response}"  # Record both parts
         })
         
         # Track topics for this caller (keep only last 10 topics)
@@ -685,7 +707,7 @@ async def process_speech(request: Request):
         if len(caller_history[from_number]['last_topics']) > 10:
             caller_history[from_number]['last_topics'] = caller_history[from_number]['last_topics'][-10:]
         
-        logger.info(f"Call {call_sid}: Caller said '{speech_result}' | AI replied '{ai_response}'")
+        logger.info(f"Call {call_sid}: Caller said '{speech_result}' | Quick: '{quick_response}' | AI: '{ai_response}'")
         
         audio_url = await generate_speech(ai_response)
         
