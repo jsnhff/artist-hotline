@@ -1,5 +1,5 @@
 import os
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, Response
 from dotenv import load_dotenv
 import logging
@@ -49,6 +49,26 @@ call_transcripts = {}
 
 # Store caller history
 caller_history = {}
+
+# Connection manager for WebSocket streams
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: list[WebSocket] = []
+        self.elevenlabs_connections = {}
+    
+    async def connect(self, websocket: WebSocket, stream_sid: str):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+        logger.info(f"WebSocket connected for stream {stream_sid}")
+    
+    def disconnect(self, websocket: WebSocket, stream_sid: str):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+        if stream_sid in self.elevenlabs_connections:
+            del self.elevenlabs_connections[stream_sid]
+        logger.info(f"WebSocket disconnected for stream {stream_sid}")
+
+manager = ConnectionManager()
 
 # Inspiring quotes
 INSPIRING_QUOTES = [
@@ -187,6 +207,113 @@ async def generate_speech(text: str) -> str:
         logger.info("Using REST API for TTS")
         return await generate_speech_with_elevenlabs(text)
 
+async def stream_speech_to_twilio(text: str, twilio_websocket: WebSocket, stream_sid: str):
+    """Stream TTS audio directly to Twilio WebSocket in real-time"""
+    try:
+        if not text.strip():
+            return
+            
+        # WebSocket streaming connection to ElevenLabs
+        uri = f"wss://api.elevenlabs.io/v1/text-to-speech/{ELEVEN_LABS_VOICE_ID}/stream-input"
+        
+        async with websockets.connect(uri) as elevenlabs_ws:
+            # Send initial message with auth and voice settings
+            init_message = {
+                "text": " ",  # Small initial text
+                "voice_settings": {
+                    "stability": 0.3,
+                    "similarity_boost": 0.75,
+                    "style": 0.0,
+                    "use_speaker_boost": True
+                },
+                "xi_api_key": ELEVEN_LABS_API_KEY
+            }
+            await elevenlabs_ws.send(json.dumps(init_message))
+            
+            # Send the actual text
+            await elevenlabs_ws.send(json.dumps({"text": text}))
+            
+            # Send EOS (end of stream)
+            await elevenlabs_ws.send(json.dumps({"text": ""}))
+            
+            # Stream audio chunks directly to Twilio
+            async for message in elevenlabs_ws:
+                data = json.loads(message)
+                
+                if data.get("audio"):
+                    # Send audio chunk directly to Twilio
+                    media_message = {
+                        "event": "media",
+                        "streamSid": stream_sid,
+                        "media": {
+                            "payload": data["audio"]  # Already base64 encoded
+                        }
+                    }
+                    await twilio_websocket.send_text(json.dumps(media_message))
+                    logger.debug(f"Sent audio chunk to Twilio for stream {stream_sid}")
+                
+                if data.get("isFinal"):
+                    logger.info(f"Finished streaming audio for text: {text[:50]}...")
+                    break
+                    
+    except Exception as e:
+        logger.error(f"Error streaming to Twilio: {e}")
+
+class AudioBuffer:
+    def __init__(self, max_chunks=50):
+        self.chunks = []
+        self.max_chunks = max_chunks
+        self.silence_threshold = 3  # seconds of silence before processing
+        self.last_chunk_time = None
+    
+    def add_chunk(self, audio_data: bytes):
+        import time
+        self.chunks.append(audio_data)
+        self.last_chunk_time = time.time()
+        
+        # Keep buffer size manageable
+        if len(self.chunks) > self.max_chunks:
+            self.chunks = self.chunks[-self.max_chunks:]
+    
+    def should_process(self) -> bool:
+        import time
+        if not self.chunks:
+            return False
+        
+        # Process if we have enough audio or if there's been silence
+        if len(self.chunks) >= 10:  # ~0.5 seconds of audio
+            return True
+        
+        if self.last_chunk_time and (time.time() - self.last_chunk_time) > self.silence_threshold:
+            return True
+            
+        return False
+    
+    def get_audio_data(self) -> bytes:
+        if self.chunks:
+            return b''.join(self.chunks)
+        return b''
+    
+    def clear(self):
+        self.chunks = []
+
+async def transcribe_audio_buffer(audio_data: bytes) -> str:
+    """Enhanced transcription with audio buffer handling"""
+    # TODO: Integrate with Deepgram WebSocket API for real-time transcription
+    # For now, simulate transcription by detecting audio presence
+    
+    if len(audio_data) > 1000:  # If we have substantial audio data
+        # Placeholder - in real implementation, this would:
+        # 1. Convert μ-law to linear PCM
+        # 2. Send to Deepgram WebSocket
+        # 3. Return real-time transcription results
+        return "[User spoke - real-time transcription would go here]"
+    
+    return ""
+
+# Store audio buffers per stream
+audio_buffers = {}
+
 @app.get("/audio/{audio_id}")
 async def serve_audio(audio_id: str):
     if audio_id in audio_cache:
@@ -308,6 +435,7 @@ async def get_ai_response(user_input: str, caller_context: str = "") -> str:
 async def handle_call(request: Request):
     form_data = await request.form()
     from_number = form_data.get('From', 'unknown')
+    call_sid = form_data.get('CallSid', 'unknown')
     
     response = VoiceResponse()
     
@@ -318,9 +446,39 @@ async def handle_call(request: Request):
     # Send SMS notification
     await send_sms_notification(from_number, is_returning, topics)
     
+    # Initialize call transcript
+    timestamp = datetime.now().isoformat()
+    if call_sid not in call_transcripts:
+        call_transcripts[call_sid] = {
+            'from_number': from_number,
+            'start_time': timestamp,
+            'conversation': []
+        }
+    
+    # Update caller history
+    if from_number not in caller_history:
+        caller_history[from_number] = {
+            'first_call': timestamp,
+            'call_count': 1,
+            'last_topics': []
+        }
+    else:
+        caller_history[from_number]['call_count'] += 1
+    
+    # If streaming is enabled, use Media Streams for real-time bidirectional audio
+    if USE_STREAMING:
+        logger.info(f"Using Media Streams for real-time conversation: {call_sid}")
+        
+        # Connect to WebSocket stream for bidirectional audio
+        connect = response.connect()
+        connect.stream(url=f"{BASE_URL}/media-stream")
+        
+        return HTMLResponse(content=str(response), media_type="application/xml")
+    
+    # Traditional approach for non-streaming calls
     if from_number in caller_history:
         caller_info = caller_history[from_number]
-        call_count = caller_info['call_count'] + 1  # Will be incremented later
+        call_count = caller_info['call_count']
         recent_topics = caller_info['last_topics'][-2:] if caller_info['last_topics'] else []
         
         if recent_topics:
@@ -463,6 +621,89 @@ async def handle_call_status(request: Request):
             await send_call_summary_sms(from_number, call_sid)
     
     return {"status": "received"}
+
+@app.websocket("/media-stream")
+async def handle_media_stream(websocket: WebSocket):
+    """Handle Twilio Media Streams for real-time bidirectional audio"""
+    stream_sid = None
+    call_sid = None
+    
+    try:
+        await manager.connect(websocket, "pending")
+        
+        while True:
+            message = await websocket.receive_text()
+            data = json.loads(message)
+            
+            if data['event'] == 'connected':
+                logger.info("Media stream connected")
+                
+            elif data['event'] == 'start':
+                stream_sid = data['start']['streamSid']
+                call_sid = data['start']['callSid']
+                logger.info(f"Media stream started: {stream_sid} for call {call_sid}")
+                
+                # Send initial greeting via streaming
+                greeting_text = "Hey! This is Synthetic Jason speaking in real-time! I can hear you clearly and respond instantly. What's on your mind?"
+                await stream_speech_to_twilio(greeting_text, websocket, stream_sid)
+                
+            elif data['event'] == 'media':
+                # Receive μ-law audio from Twilio (8kHz, base64)
+                audio_payload = data['media']['payload']
+                audio_chunk = base64.b64decode(audio_payload)
+                
+                # Initialize audio buffer for this stream if needed
+                if stream_sid not in audio_buffers:
+                    audio_buffers[stream_sid] = AudioBuffer()
+                
+                # Add chunk to buffer
+                buffer = audio_buffers[stream_sid]
+                buffer.add_chunk(audio_chunk)
+                
+                # Check if we should process accumulated audio
+                if buffer.should_process():
+                    audio_data = buffer.get_audio_data()
+                    
+                    # Transcribe accumulated audio
+                    transcription = await transcribe_audio_buffer(audio_data)
+                    
+                    if transcription and transcription.strip():
+                        logger.info(f"Transcribed: {transcription}")
+                        
+                        # Generate AI response
+                        ai_response = await get_ai_response(transcription)
+                        
+                        # Record conversation if we have call_sid
+                        if call_sid and call_sid in call_transcripts:
+                            timestamp = datetime.now().isoformat()
+                            call_transcripts[call_sid]['conversation'].append({
+                                'timestamp': timestamp,
+                                'caller': transcription,
+                                'ai': ai_response
+                            })
+                        
+                        # Stream AI response back
+                        await stream_speech_to_twilio(ai_response, websocket, stream_sid)
+                        
+                        # Clear buffer after processing
+                        buffer.clear()
+                
+                logger.debug(f"Processed audio chunk: {len(audio_chunk)} bytes, buffer size: {len(buffer.chunks)}")
+                
+            elif data['event'] == 'closed':
+                logger.info(f"Media stream closed: {stream_sid}")
+                break
+                
+    except WebSocketDisconnect:
+        logger.info("Media stream WebSocket disconnected")
+    except Exception as e:
+        logger.error(f"Media stream error: {e}")
+    finally:
+        if stream_sid:
+            manager.disconnect(websocket, stream_sid)
+            # Clean up audio buffer
+            if stream_sid in audio_buffers:
+                del audio_buffers[stream_sid]
 
 if __name__ == "__main__":
     import uvicorn
