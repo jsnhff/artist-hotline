@@ -149,17 +149,17 @@ async def generate_speech_with_elevenlabs(text: str) -> str:
         
         data = {
             "text": text,
-            "model_id": "eleven_turbo_v2_5",
+            "model_id": "eleven_flash_v2_5",  # Fastest model
             "voice_settings": {
                 "stability": 0.3,
                 "similarity_boost": 0.75,
                 "style": 0.0,
                 "use_speaker_boost": True
             },
-            "optimize_streaming_latency": 1
+            "optimize_streaming_latency": 4  # Maximum speed optimization
         }
         
-        async with httpx.AsyncClient(timeout=3.0) as client:  # Optimized for speed
+        async with httpx.AsyncClient(timeout=5.0) as client:  # Allow time for flash model
             response = await client.post(url, json=data, headers=headers)
             
             if response.status_code == 200:
@@ -240,9 +240,9 @@ async def generate_speech_with_elevenlabs_streaming(text: str) -> str:
         return None
 
 async def generate_speech(text: str) -> str:
-    """Unified TTS function that chooses between REST API and WebSocket streaming"""
+    """Hybrid approach: Use streaming TTS for speed, fallback to REST for reliability"""
     if USE_STREAMING:
-        logger.info("Using WebSocket streaming for TTS")
+        logger.info("Using hybrid streaming TTS (streaming generation, cached playback)")
         result = await generate_speech_with_elevenlabs_streaming(text)
         if result:
             return result
@@ -251,7 +251,7 @@ async def generate_speech(text: str) -> str:
             logger.warning("Streaming failed, falling back to REST API")
             return await generate_speech_with_elevenlabs(text)
     else:
-        logger.info("Using REST API for TTS")
+        logger.info("Using optimized REST API for TTS")
         return await generate_speech_with_elevenlabs(text)
 
 async def stream_speech_to_twilio(text: str, twilio_websocket: WebSocket, stream_sid: str):
@@ -586,19 +586,18 @@ async def handle_call(request: Request):
     else:
         caller_history[from_number]['call_count'] += 1
     
-    # If streaming is enabled, use Media Streams for real-time bidirectional audio
-    if USE_STREAMING:
-        logger.info(f"Using Media Streams for real-time conversation: {call_sid}")
-        
-        # Connect to WebSocket stream for bidirectional audio
-        connect = response.connect()
-        # Convert https:// to wss:// for WebSocket connection
-        ws_url = BASE_URL.replace("https://", "wss://").replace("http://", "ws://")
-        stream_url = f"{ws_url}/media-stream"
-        logger.info(f"Connecting to Media Stream: {stream_url}")
-        connect.stream(url=stream_url)
-        
-        return HTMLResponse(content=str(response), media_type="application/xml")
+    # DISABLED: Complex WebSocket system - using hybrid approach instead
+    # if USE_STREAMING:
+    #     logger.info(f"Using Media Streams for real-time conversation: {call_sid}")
+    #     
+    #     # Connect to WebSocket stream for bidirectional audio
+    #     connect = response.connect()
+    #     ws_url = BASE_URL.replace("https://", "wss://").replace("http://", "ws://")
+    #     stream_url = f"{ws_url}/media-stream"
+    #     logger.info(f"Connecting to Media Stream: {stream_url}")
+    #     connect.stream(url=stream_url)
+    #     
+    #     return HTMLResponse(content=str(response), media_type="application/xml")
     
     # Traditional approach for non-streaming calls
     if from_number in caller_history:
@@ -625,8 +624,8 @@ async def handle_call(request: Request):
         input='speech',
         action='/process-speech',
         method='POST',
-        speech_timeout=3,
-        timeout=10
+        speech_timeout=1,  # Faster silence detection
+        timeout=8  # Shorter overall timeout
     )
     
     timeout_audio_url = await generate_speech("I didn't catch that. Talk to you later!")
@@ -699,8 +698,8 @@ async def process_speech(request: Request):
             input='speech',
             action='/process-speech',
             method='POST',
-            speech_timeout=3,
-            timeout=10
+            speech_timeout=1,  # Faster silence detection
+            timeout=8  # Shorter overall timeout
         )
     else:
         # Send call summary before hanging up if we have a conversation
