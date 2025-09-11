@@ -15,6 +15,7 @@ import random
 import websockets
 import base64
 import time
+from collections import deque
 
 # Load environment variables
 load_dotenv()
@@ -109,6 +110,27 @@ async def streaming_health_check():
         health_status["status"] = "streaming_disabled"
     
     return health_status
+
+@app.get("/logs")
+async def get_recent_logs():
+    """Get recent application logs for debugging"""
+    return {
+        "total_logs": len(log_capture.logs),
+        "logs": list(log_capture.logs)[-100:]  # Last 100 logs
+    }
+
+@app.get("/logs/streaming")
+async def get_streaming_logs():
+    """Get logs related to streaming specifically"""
+    streaming_logs = [
+        log for log in log_capture.logs 
+        if any(keyword in log['message'].lower() for keyword in 
+               ['streaming', 'elevenlabs', 'websocket', 'audio', 'chunk', 'twilio'])
+    ]
+    return {
+        "total_streaming_logs": len(streaming_logs),
+        "logs": streaming_logs[-50:]  # Last 50 streaming-related logs
+    }
 
 @app.get("/")
 async def root():
@@ -378,6 +400,25 @@ async def transcribe_audio_buffer(audio_data: bytes) -> str:
 
 # Store audio buffers per stream
 audio_buffers = {}
+
+# Store recent logs for debugging
+class LogCapture(logging.Handler):
+    def __init__(self, maxlen=500):
+        super().__init__()
+        self.logs = deque(maxlen=maxlen)
+    
+    def emit(self, record):
+        log_entry = {
+            'timestamp': datetime.fromtimestamp(record.created).isoformat(),
+            'level': record.levelname,
+            'message': self.format(record)
+        }
+        self.logs.append(log_entry)
+
+# Add log capture handler
+log_capture = LogCapture()
+log_capture.setLevel(logging.DEBUG)
+logger.addHandler(log_capture)
 
 @app.get("/audio/{audio_id}")
 async def serve_audio(audio_id: str):
