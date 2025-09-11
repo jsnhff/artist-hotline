@@ -269,6 +269,7 @@ async def stream_speech_to_twilio(text: str, twilio_websocket: WebSocket, stream
         
         async with websockets.connect(uri) as elevenlabs_ws:
             # Send initial message with auth and voice settings
+            # Try to request μ-law format compatible with Twilio (8kHz)
             init_message = {
                 "text": " ",  # Small initial text
                 "voice_settings": {
@@ -276,6 +277,9 @@ async def stream_speech_to_twilio(text: str, twilio_websocket: WebSocket, stream
                     "similarity_boost": 0.75,
                     "style": 0.0,
                     "use_speaker_boost": True
+                },
+                "generation_config": {
+                    "chunk_length_schedule": [120, 160, 250, 290]
                 },
                 "xi_api_key": ELEVEN_LABS_API_KEY
             }
@@ -313,16 +317,21 @@ async def stream_speech_to_twilio(text: str, twilio_websocket: WebSocket, stream
                             audio_bytes = base64.b64decode(audio_b64)
                             total_audio_bytes += len(audio_bytes)
                             logger.debug(f"Audio chunk {chunk_count}: {len(audio_bytes)} bytes decoded from {len(audio_b64)} base64 chars")
+                            
+                            # TEMPORARY: For now, try sending raw audio and see what happens
+                            # TODO: Convert from ElevenLabs format to μ-law 8kHz
+                            logger.warning(f"🚨 Sending ElevenLabs audio directly (may cause static due to format mismatch)")
+                            
                         except Exception as decode_error:
                             logger.error(f"Failed to decode audio chunk: {decode_error}")
                             continue
                         
-                        # Send to Twilio
+                        # Send to Twilio (with format warning)
                         media_message = {
                             "event": "media",
                             "streamSid": stream_sid,
                             "media": {
-                                "payload": audio_b64
+                                "payload": audio_b64  # Raw ElevenLabs audio - needs conversion
                             }
                         }
                         
@@ -770,18 +779,14 @@ async def handle_media_stream(websocket: WebSocket):
                 # Send initial greeting via streaming  
                 greeting_text = "Hey! This is Synthetic Jason speaking in real-time! I can hear you clearly and respond instantly. What's on your mind?"
                 
-                # TEMPORARY: Skip audio streaming to test if format is the issue
-                logger.info("🚨 TEMPORARILY SKIPPING AUDIO STREAMING TO TEST FORMAT ISSUE")
-                logger.info(f"Would stream: {greeting_text}")
-                
-                # try:
-                #     # Add small delay to ensure WebSocket is fully established
-                #     await asyncio.sleep(0.1)
-                #     await stream_speech_to_twilio(greeting_text, websocket, stream_sid)
-                #     logger.info("✅ Initial greeting streamed successfully")
-                # except Exception as greeting_error:
-                #     logger.error(f"❌ Failed to stream initial greeting: {greeting_error}")
-                #     fallback_triggered = True
+                try:
+                    # Add small delay to ensure WebSocket is fully established
+                    await asyncio.sleep(0.1)
+                    await stream_speech_to_twilio(greeting_text, websocket, stream_sid)
+                    logger.info("✅ Initial greeting streamed successfully")
+                except Exception as greeting_error:
+                    logger.error(f"❌ Failed to stream initial greeting: {greeting_error}")
+                    fallback_triggered = True
                 
             elif data['event'] == 'media':
                 # Receive μ-law audio from Twilio (8kHz, base64)
@@ -801,9 +806,31 @@ async def handle_media_stream(websocket: WebSocket):
                     audio_data = buffer.get_audio_data()
                     logger.info(f"Processing audio buffer: {len(audio_data)} bytes")
                     
-                    # TEMPORARY: Skip all audio responses to test
-                    logger.info(f"🚨 WOULD RESPOND TO AUDIO: {len(audio_data)} bytes detected")
-                    buffer.clear()
+                    # Simple test response to verify pipeline
+                    if len(audio_data) > 2000 and not hasattr(buffer, 'last_response_time'):
+                        logger.info("Audio detected - sending test response")
+                        
+                        # Generate simple test response
+                        test_response = "I heard you! This may sound distorted due to audio format issues."
+                        
+                        # Stream test response back with error handling
+                        try:
+                            await stream_speech_to_twilio(test_response, websocket, stream_sid)
+                            logger.info("✅ Test response streamed successfully")
+                            buffer.last_response_time = time.time()  # Rate limiting
+                        except Exception as response_error:
+                            logger.error(f"❌ Failed to stream test response: {response_error}")
+                            fallback_triggered = True
+                        
+                        # Clear buffer after processing
+                        buffer.clear()
+                    elif hasattr(buffer, 'last_response_time') and (time.time() - buffer.last_response_time) < 10:
+                        # Rate limit responses to every 10 seconds for testing
+                        logger.debug("Skipping response due to rate limiting")
+                        buffer.clear()
+                    else:
+                        logger.info(f"🚨 AUDIO DETECTED: {len(audio_data)} bytes (not responding due to threshold)")
+                        buffer.clear()
                     
                     # # For now, respond to any audio activity to test the pipeline
                     # # But limit responses to prevent overwhelming the WebSocket
