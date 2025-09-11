@@ -12,6 +12,8 @@ import asyncio
 from datetime import datetime
 import json
 import random
+import websockets
+import base64
 
 # Load environment variables
 load_dotenv()
@@ -31,6 +33,7 @@ TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
 YOUR_PHONE_NUMBER = os.getenv("YOUR_PHONE_NUMBER")
 BASE_URL = os.getenv("BASE_URL", "https://your-app-url.com")
+USE_STREAMING = os.getenv("USE_STREAMING", "false").lower() == "true"
 
 # Configure OpenAI
 openai.api_key = OPENAI_API_KEY
@@ -103,6 +106,86 @@ async def generate_speech_with_elevenlabs(text: str) -> str:
     except Exception as e:
         logger.error(f"ElevenLabs error: {e}")
         return None
+
+async def generate_speech_with_elevenlabs_streaming(text: str) -> str:
+    try:
+        if not text.strip():
+            return None
+            
+        text_hash = hashlib.md5(text.encode()).hexdigest()
+        
+        # Check cache first
+        if text_hash in audio_cache:
+            return f"{BASE_URL}/audio/{text_hash}"
+        
+        # WebSocket streaming connection
+        uri = f"wss://api.elevenlabs.io/v1/text-to-speech/{ELEVEN_LABS_VOICE_ID}/stream-input"
+        
+        try:
+            async with websockets.connect(uri) as websocket:
+                # Send initial message with auth and voice settings
+                init_message = {
+                    "text": " ",  # Small initial text
+                    "voice_settings": {
+                        "stability": 0.3,
+                        "similarity_boost": 0.75,
+                        "style": 0.0,
+                        "use_speaker_boost": True
+                    },
+                    "xi_api_key": ELEVEN_LABS_API_KEY
+                }
+                await websocket.send(json.dumps(init_message))
+                
+                # Send the actual text
+                await websocket.send(json.dumps({"text": text}))
+                
+                # Send EOS (end of stream)
+                await websocket.send(json.dumps({"text": ""}))
+                
+                # Collect audio chunks
+                audio_chunks = []
+                async for message in websocket:
+                    data = json.loads(message)
+                    
+                    if data.get("audio"):
+                        audio_chunk = base64.b64decode(data["audio"])
+                        audio_chunks.append(audio_chunk)
+                    
+                    if data.get("isFinal"):
+                        break
+                
+                if audio_chunks:
+                    # Combine all chunks
+                    full_audio = b''.join(audio_chunks)
+                    audio_cache[text_hash] = full_audio
+                    logger.info(f"Streaming TTS generated {len(full_audio)} bytes for text: {text[:50]}...")
+                    return f"{BASE_URL}/audio/{text_hash}"
+                else:
+                    logger.error("No audio chunks received from streaming")
+                    return None
+                    
+        except websockets.exceptions.WebSocketException as e:
+            logger.error(f"WebSocket connection failed: {e}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Streaming TTS error: {e}")
+        return None
+
+async def generate_speech(text: str) -> str:
+    """Unified TTS function that chooses between REST API and WebSocket streaming"""
+    if USE_STREAMING:
+        logger.info("Using WebSocket streaming for TTS")
+        result = await generate_speech_with_elevenlabs_streaming(text)
+        if result:
+            return result
+        else:
+            # Fallback to REST API if streaming fails
+            logger.warning("Streaming failed, falling back to REST API")
+            return await generate_speech_with_elevenlabs(text)
+    else:
+        logger.info("Using REST API for TTS")
+        return await generate_speech_with_elevenlabs(text)
 
 @app.get("/audio/{audio_id}")
 async def serve_audio(audio_id: str):
@@ -248,7 +331,7 @@ async def handle_call(request: Request):
     else:
         greeting_text = "Hey! This is Synthetic Jason - I'm basically Jason Huff but weirder and more obsessed with art! Fair warning, I'm going to try to turn everything into a creative project, and yeah, this call gets logged. So what wild idea should we dream up together?"
     
-    greeting_audio_url = await generate_speech_with_elevenlabs(greeting_text)
+    greeting_audio_url = await generate_speech(greeting_text)
     
     if greeting_audio_url:
         response.play(greeting_audio_url)
@@ -263,7 +346,7 @@ async def handle_call(request: Request):
         timeout=10
     )
     
-    timeout_audio_url = await generate_speech_with_elevenlabs("I didn't catch that. Talk to you later!")
+    timeout_audio_url = await generate_speech("I didn't catch that. Talk to you later!")
     if timeout_audio_url:
         response.play(timeout_audio_url)
     else:
@@ -322,7 +405,7 @@ async def process_speech(request: Request):
         
         logger.info(f"Call {call_sid}: Caller said '{speech_result}' | AI replied '{ai_response}'")
         
-        audio_url = await generate_speech_with_elevenlabs(ai_response)
+        audio_url = await generate_speech(ai_response)
         
         if audio_url:
             response.play(audio_url)
@@ -341,7 +424,7 @@ async def process_speech(request: Request):
         if call_sid in call_transcripts and call_transcripts[call_sid]['conversation']:
             await send_call_summary_sms(from_number, call_sid)
         
-        timeout_audio_url = await generate_speech_with_elevenlabs("I couldn't catch what you said. Talk to you later!")
+        timeout_audio_url = await generate_speech("I couldn't catch what you said. Talk to you later!")
         if timeout_audio_url:
             response.play(timeout_audio_url)
         else:
