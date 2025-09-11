@@ -327,10 +327,16 @@ async def stream_speech_to_twilio(text: str, twilio_websocket: WebSocket, stream
                         }
                         
                         try:
-                            await twilio_websocket.send_text(json.dumps(media_message))
-                            logger.debug(f"✅ Sent audio chunk {chunk_count} to Twilio")
+                            # Check if WebSocket is still connected before sending
+                            if twilio_websocket.client_state.name == "CONNECTED":
+                                await twilio_websocket.send_text(json.dumps(media_message))
+                                logger.debug(f"✅ Sent audio chunk {chunk_count} to Twilio")
+                            else:
+                                logger.error(f"Twilio WebSocket not connected (state: {twilio_websocket.client_state.name})")
+                                break
                         except Exception as send_error:
                             logger.error(f"Failed to send audio to Twilio: {send_error}")
+                            break  # Stop trying to send if connection is broken
                     
                     if data.get("isFinal"):
                         logger.info(f"✅ Finished streaming: {chunk_count} chunks, {total_audio_bytes} total bytes for '{text[:30]}...'")
@@ -763,6 +769,8 @@ async def handle_media_stream(websocket: WebSocket):
                 # Send initial greeting via streaming  
                 greeting_text = "Hey! This is Synthetic Jason speaking in real-time! I can hear you clearly and respond instantly. What's on your mind?"
                 try:
+                    # Add small delay to ensure WebSocket is fully established
+                    await asyncio.sleep(0.1)
                     await stream_speech_to_twilio(greeting_text, websocket, stream_sid)
                     logger.info("✅ Initial greeting streamed successfully")
                 except Exception as greeting_error:
@@ -788,7 +796,8 @@ async def handle_media_stream(websocket: WebSocket):
                     logger.info(f"Processing audio buffer: {len(audio_data)} bytes")
                     
                     # For now, respond to any audio activity to test the pipeline
-                    if len(audio_data) > 500:  # If we detect substantial audio
+                    # But limit responses to prevent overwhelming the WebSocket
+                    if len(audio_data) > 2000 and not hasattr(buffer, 'last_response_time'):  # More substantial audio + rate limiting
                         logger.info("Audio detected - sending test response")
                         
                         # Generate simple test response
@@ -798,11 +807,16 @@ async def handle_media_stream(websocket: WebSocket):
                         try:
                             await stream_speech_to_twilio(test_response, websocket, stream_sid)
                             logger.info("✅ Test response streamed successfully")
+                            buffer.last_response_time = time.time()  # Rate limiting
                         except Exception as response_error:
                             logger.error(f"❌ Failed to stream test response: {response_error}")
                             fallback_triggered = True
                         
                         # Clear buffer after processing
+                        buffer.clear()
+                    elif hasattr(buffer, 'last_response_time') and (time.time() - buffer.last_response_time) < 5:
+                        # Rate limit responses to every 5 seconds
+                        logger.debug("Skipping response due to rate limiting")
                         buffer.clear()
                 
                 logger.debug(f"Processed audio chunk: {len(audio_chunk)} bytes, buffer size: {len(buffer.chunks)}")
