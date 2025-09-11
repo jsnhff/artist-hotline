@@ -754,9 +754,10 @@ async def handle_media_stream(websocket: WebSocket):
         while True:
             message = await websocket.receive_text()
             data = json.loads(message)
+            logger.debug(f"Received Twilio message: {data.get('event', 'unknown')} - {list(data.keys())}")
             
             if data['event'] == 'connected':
-                logger.info("Media stream connected")
+                logger.info("✅ Media stream connected")
                 
             elif data['event'] == 'start':
                 stream_sid = data['start']['streamSid']
@@ -768,14 +769,19 @@ async def handle_media_stream(websocket: WebSocket):
                 
                 # Send initial greeting via streaming  
                 greeting_text = "Hey! This is Synthetic Jason speaking in real-time! I can hear you clearly and respond instantly. What's on your mind?"
-                try:
-                    # Add small delay to ensure WebSocket is fully established
-                    await asyncio.sleep(0.1)
-                    await stream_speech_to_twilio(greeting_text, websocket, stream_sid)
-                    logger.info("✅ Initial greeting streamed successfully")
-                except Exception as greeting_error:
-                    logger.error(f"❌ Failed to stream initial greeting: {greeting_error}")
-                    fallback_triggered = True
+                
+                # TEMPORARY: Skip audio streaming to test if format is the issue
+                logger.info("🚨 TEMPORARILY SKIPPING AUDIO STREAMING TO TEST FORMAT ISSUE")
+                logger.info(f"Would stream: {greeting_text}")
+                
+                # try:
+                #     # Add small delay to ensure WebSocket is fully established
+                #     await asyncio.sleep(0.1)
+                #     await stream_speech_to_twilio(greeting_text, websocket, stream_sid)
+                #     logger.info("✅ Initial greeting streamed successfully")
+                # except Exception as greeting_error:
+                #     logger.error(f"❌ Failed to stream initial greeting: {greeting_error}")
+                #     fallback_triggered = True
                 
             elif data['event'] == 'media':
                 # Receive μ-law audio from Twilio (8kHz, base64)
@@ -795,29 +801,33 @@ async def handle_media_stream(websocket: WebSocket):
                     audio_data = buffer.get_audio_data()
                     logger.info(f"Processing audio buffer: {len(audio_data)} bytes")
                     
-                    # For now, respond to any audio activity to test the pipeline
-                    # But limit responses to prevent overwhelming the WebSocket
-                    if len(audio_data) > 2000 and not hasattr(buffer, 'last_response_time'):  # More substantial audio + rate limiting
-                        logger.info("Audio detected - sending test response")
-                        
-                        # Generate simple test response
-                        test_response = "I heard you! This is a test of real-time audio streaming."
-                        
-                        # Stream test response back with error handling
-                        try:
-                            await stream_speech_to_twilio(test_response, websocket, stream_sid)
-                            logger.info("✅ Test response streamed successfully")
-                            buffer.last_response_time = time.time()  # Rate limiting
-                        except Exception as response_error:
-                            logger.error(f"❌ Failed to stream test response: {response_error}")
-                            fallback_triggered = True
-                        
-                        # Clear buffer after processing
-                        buffer.clear()
-                    elif hasattr(buffer, 'last_response_time') and (time.time() - buffer.last_response_time) < 5:
-                        # Rate limit responses to every 5 seconds
-                        logger.debug("Skipping response due to rate limiting")
-                        buffer.clear()
+                    # TEMPORARY: Skip all audio responses to test
+                    logger.info(f"🚨 WOULD RESPOND TO AUDIO: {len(audio_data)} bytes detected")
+                    buffer.clear()
+                    
+                    # # For now, respond to any audio activity to test the pipeline
+                    # # But limit responses to prevent overwhelming the WebSocket
+                    # if len(audio_data) > 2000 and not hasattr(buffer, 'last_response_time'):  # More substantial audio + rate limiting
+                    #     logger.info("Audio detected - sending test response")
+                    #     
+                    #     # Generate simple test response
+                    #     test_response = "I heard you! This is a test of real-time audio streaming."
+                    #     
+                    #     # Stream test response back with error handling
+                    #     try:
+                    #         await stream_speech_to_twilio(test_response, websocket, stream_sid)
+                    #         logger.info("✅ Test response streamed successfully")
+                    #         buffer.last_response_time = time.time()  # Rate limiting
+                    #     except Exception as response_error:
+                    #         logger.error(f"❌ Failed to stream test response: {response_error}")
+                    #         fallback_triggered = True
+                    #     
+                    #     # Clear buffer after processing
+                    #     buffer.clear()
+                    # elif hasattr(buffer, 'last_response_time') and (time.time() - buffer.last_response_time) < 5:
+                    #     # Rate limit responses to every 5 seconds
+                    #     logger.debug("Skipping response due to rate limiting")
+                    #     buffer.clear()
                 
                 logger.debug(f"Processed audio chunk: {len(audio_chunk)} bytes, buffer size: {len(buffer.chunks)}")
                 
