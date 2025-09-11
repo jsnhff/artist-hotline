@@ -14,6 +14,7 @@ import json
 import random
 import websockets
 import base64
+import time
 
 # Load environment variables
 load_dotenv()
@@ -267,7 +268,6 @@ class AudioBuffer:
         self.last_chunk_time = None
     
     def add_chunk(self, audio_data: bytes):
-        import time
         self.chunks.append(audio_data)
         self.last_chunk_time = time.time()
         
@@ -276,7 +276,6 @@ class AudioBuffer:
             self.chunks = self.chunks[-self.max_chunks:]
     
     def should_process(self) -> bool:
-        import time
         if not self.chunks:
             return False
         
@@ -633,7 +632,8 @@ async def handle_media_stream(websocket: WebSocket):
     call_sid = None
     
     try:
-        await manager.connect(websocket, "pending")
+        await websocket.accept()
+        logger.info("Media stream WebSocket accepted")
         
         while True:
             message = await websocket.receive_text()
@@ -646,6 +646,9 @@ async def handle_media_stream(websocket: WebSocket):
                 stream_sid = data['start']['streamSid']
                 call_sid = data['start']['callSid']
                 logger.info(f"Media stream started: {stream_sid} for call {call_sid}")
+                
+                # Now properly connect to the manager with the real stream_sid
+                manager.active_connections.append(websocket)
                 
                 # Send initial greeting via streaming
                 greeting_text = "Hey! This is Synthetic Jason speaking in real-time! I can hear you clearly and respond instantly. What's on your mind?"
