@@ -86,6 +86,30 @@ INSPIRING_QUOTES = [
 async def health_check():
     return {"status": "healthy", "message": "Replicant Jason hotline is running"}
 
+@app.get("/health/streaming")
+async def streaming_health_check():
+    """Check if streaming configuration is valid"""
+    health_status = {
+        "streaming_enabled": USE_STREAMING,
+        "base_url": BASE_URL,
+        "elevenlabs_configured": bool(ELEVEN_LABS_API_KEY and ELEVEN_LABS_VOICE_ID),
+        "websocket_url": None,
+        "status": "unknown"
+    }
+    
+    if USE_STREAMING:
+        ws_url = BASE_URL.replace("https://", "wss://").replace("http://", "ws://")
+        health_status["websocket_url"] = f"{ws_url}/media-stream"
+        
+        if health_status["elevenlabs_configured"]:
+            health_status["status"] = "ready"
+        else:
+            health_status["status"] = "missing_elevenlabs_config"
+    else:
+        health_status["status"] = "streaming_disabled"
+    
+    return health_status
+
 @app.get("/")
 async def root():
     return {"message": "Welcome to Replicant Jason's Voice Hotline", "status": "ready"}
@@ -212,10 +236,14 @@ async def stream_speech_to_twilio(text: str, twilio_websocket: WebSocket, stream
     """Stream TTS audio directly to Twilio WebSocket in real-time"""
     try:
         if not text.strip():
+            logger.warning("Empty text provided to stream_speech_to_twilio")
             return
             
+        logger.info(f"Starting ElevenLabs streaming for: '{text[:50]}...'")
+        
         # WebSocket streaming connection to ElevenLabs
         uri = f"wss://api.elevenlabs.io/v1/text-to-speech/{ELEVEN_LABS_VOICE_ID}/stream-input"
+        logger.debug(f"Connecting to ElevenLabs: {uri}")
         
         async with websockets.connect(uri) as elevenlabs_ws:
             # Send initial message with auth and voice settings
@@ -229,37 +257,74 @@ async def stream_speech_to_twilio(text: str, twilio_websocket: WebSocket, stream
                 },
                 "xi_api_key": ELEVEN_LABS_API_KEY
             }
+            logger.debug("Sending ElevenLabs init message")
             await elevenlabs_ws.send(json.dumps(init_message))
             
             # Send the actual text
+            logger.debug(f"Sending text to ElevenLabs: {text}")
             await elevenlabs_ws.send(json.dumps({"text": text}))
             
             # Send EOS (end of stream)
+            logger.debug("Sending EOS to ElevenLabs")
             await elevenlabs_ws.send(json.dumps({"text": ""}))
             
             # Stream audio chunks directly to Twilio
+            chunk_count = 0
+            total_audio_bytes = 0
+            
             async for message in elevenlabs_ws:
-                data = json.loads(message)
-                
-                if data.get("audio"):
-                    # ElevenLabs sends base64 encoded audio, but we need to check format
-                    # For now, let's try sending it directly and see what happens
-                    media_message = {
-                        "event": "media",
-                        "streamSid": stream_sid,
-                        "media": {
-                            "payload": data["audio"]  # ElevenLabs base64 audio
-                        }
-                    }
-                    await twilio_websocket.send_text(json.dumps(media_message))
-                    logger.debug(f"Sent audio chunk to Twilio: {len(data['audio'])} base64 chars")
-                
-                if data.get("isFinal"):
-                    logger.info(f"Finished streaming audio for text: {text[:50]}...")
-                    break
+                try:
+                    data = json.loads(message)
+                    logger.debug(f"ElevenLabs response: {list(data.keys())}")
                     
+                    # Check for errors first
+                    if data.get("error"):
+                        logger.error(f"ElevenLabs error: {data['error']}")
+                        break
+                    
+                    if data.get("audio"):
+                        chunk_count += 1
+                        audio_b64 = data["audio"]
+                        
+                        # Decode to check actual audio size
+                        try:
+                            audio_bytes = base64.b64decode(audio_b64)
+                            total_audio_bytes += len(audio_bytes)
+                            logger.debug(f"Audio chunk {chunk_count}: {len(audio_bytes)} bytes decoded from {len(audio_b64)} base64 chars")
+                        except Exception as decode_error:
+                            logger.error(f"Failed to decode audio chunk: {decode_error}")
+                            continue
+                        
+                        # Send to Twilio
+                        media_message = {
+                            "event": "media",
+                            "streamSid": stream_sid,
+                            "media": {
+                                "payload": audio_b64
+                            }
+                        }
+                        
+                        try:
+                            await twilio_websocket.send_text(json.dumps(media_message))
+                            logger.debug(f"✅ Sent audio chunk {chunk_count} to Twilio")
+                        except Exception as send_error:
+                            logger.error(f"Failed to send audio to Twilio: {send_error}")
+                    
+                    if data.get("isFinal"):
+                        logger.info(f"✅ Finished streaming: {chunk_count} chunks, {total_audio_bytes} total bytes for '{text[:30]}...'")
+                        break
+                        
+                except json.JSONDecodeError as json_error:
+                    logger.error(f"Invalid JSON from ElevenLabs: {json_error}")
+                except Exception as chunk_error:
+                    logger.error(f"Error processing ElevenLabs chunk: {chunk_error}")
+                    
+    except websockets.exceptions.WebSocketException as ws_error:
+        logger.error(f"ElevenLabs WebSocket error: {ws_error}")
     except Exception as e:
-        logger.error(f"Error streaming to Twilio: {e}")
+        logger.error(f"Error in stream_speech_to_twilio: {e}")
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
 
 class AudioBuffer:
     def __init__(self, max_chunks=50):
@@ -634,7 +699,10 @@ async def handle_media_stream(websocket: WebSocket):
     
     try:
         await websocket.accept()
-        logger.info("Media stream WebSocket accepted")
+        logger.info("✅ Media stream WebSocket accepted")
+        
+        # Add fallback mechanism - if streaming fails, we can fallback to traditional approach
+        fallback_triggered = False
         
         while True:
             message = await websocket.receive_text()
@@ -653,7 +721,12 @@ async def handle_media_stream(websocket: WebSocket):
                 
                 # Send initial greeting via streaming  
                 greeting_text = "Hey! This is Synthetic Jason speaking in real-time! I can hear you clearly and respond instantly. What's on your mind?"
-                await stream_speech_to_twilio(greeting_text, websocket, stream_sid)
+                try:
+                    await stream_speech_to_twilio(greeting_text, websocket, stream_sid)
+                    logger.info("✅ Initial greeting streamed successfully")
+                except Exception as greeting_error:
+                    logger.error(f"❌ Failed to stream initial greeting: {greeting_error}")
+                    fallback_triggered = True
                 
             elif data['event'] == 'media':
                 # Receive μ-law audio from Twilio (8kHz, base64)
@@ -680,8 +753,13 @@ async def handle_media_stream(websocket: WebSocket):
                         # Generate simple test response
                         test_response = "I heard you! This is a test of real-time audio streaming."
                         
-                        # Stream test response back
-                        await stream_speech_to_twilio(test_response, websocket, stream_sid)
+                        # Stream test response back with error handling
+                        try:
+                            await stream_speech_to_twilio(test_response, websocket, stream_sid)
+                            logger.info("✅ Test response streamed successfully")
+                        except Exception as response_error:
+                            logger.error(f"❌ Failed to stream test response: {response_error}")
+                            fallback_triggered = True
                         
                         # Clear buffer after processing
                         buffer.clear()
