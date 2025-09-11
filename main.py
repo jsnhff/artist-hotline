@@ -471,7 +471,11 @@ async def handle_call(request: Request):
         
         # Connect to WebSocket stream for bidirectional audio
         connect = response.connect()
-        connect.stream(url=f"{BASE_URL}/media-stream")
+        # Convert https:// to wss:// for WebSocket connection
+        ws_url = BASE_URL.replace("https://", "wss://").replace("http://", "ws://")
+        stream_url = f"{ws_url}/media-stream"
+        logger.info(f"Connecting to Media Stream: {stream_url}")
+        connect.stream(url=stream_url)
         
         return HTMLResponse(content=str(response), media_type="application/xml")
     
