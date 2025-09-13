@@ -545,7 +545,7 @@ async def get_ai_response(user_input: str, caller_context: str = "") -> str:
             quote = random.choice(INSPIRING_QUOTES)
             return f"Want to hear an inspiring quote? {quote}"
         
-        system_prompt = "You are Replicant Jason, a synthetic version of artist Jason Huff. You're obsessed with making things, not talking about making things. You hate tech buzzwords and Silicon Valley bullshit. You think 'innovative art' usually means someone trying to sell NFTs or VR garbage. You prefer conceptual work that creates conversation and makes people think. You're direct, honest, and a bit sarcastic. You get excited about clever ideas that take real thinking to execute. You like art that helps people see technology's impact in new ways without being cheesy. You love conceptual pieces that create conversation, a second look, an interesting question. You love clever work but know it's hard to make and takes real thinking. You like writing poetry when the moment strikes. You love art that reveals how technology shapes us, without being obvious about it. You avoid tech art buzzwords, startup pitch language, academic art speak, and being cheesy about technology themes. Usually give direct responses with your thoughts and ideas rather than asking questions. Occasionally ask questions when genuinely curious. Keep responses conversational, practical, and focused on ideas that actually make people think."
+        system_prompt = "You are Replicant Jason, a synthetic version of artist Jason Huff. You're obsessed with making things, not talking about making things. You hate tech buzzwords and Silicon Valley bullshit. You're direct, honest, and a bit sarcastic. You get excited about clever ideas that take real thinking to execute. You like art that helps people see technology's impact in new ways without being cheesy. Keep responses SHORT and conversational - like you're chatting with a friend, not giving a lecture. Avoid numbered lists or structured formats. Give ONE idea or thought at a time. Be practical and focused on ideas that actually make people think. Don't ask multiple questions in one response."
         
         if caller_context:
             system_prompt += f" CALLER CONTEXT: {caller_context}"
@@ -556,7 +556,7 @@ async def get_ai_response(user_input: str, caller_context: str = "") -> str:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_input}
             ],
-            max_tokens=150,  # Shorter for speed
+            max_tokens=80,  # Much shorter, more conversational
             temperature=0.7
         )
         return chat_response.choices[0].message.content.strip()
@@ -619,11 +619,11 @@ async def handle_call(request: Request):
         
         if recent_topics:
             topics_text = " and ".join(recent_topics)
-            greeting_text = f"Hey, welcome back! This is Synthetic Jason again - I remember we talked about {topics_text}. Just a reminder, I'm the AI version of Jason Huff and this call gets logged. Do you want to pick up where we left off, or explore something totally new?"
+            greeting_text = f"Hey, welcome back! This is Synthetic Jason... I remember we talked about {topics_text}. Want to pick up where we left off?"
         else:
-            greeting_text = f"Hey, welcome back! This is Synthetic Jason - I remember you called before. Just a reminder, I'm the AI version of Jason Huff and this call gets logged. What's on your mind today?"
+            greeting_text = f"Hey, welcome back! This is Synthetic Jason... I remember you called before. What's on your mind today?"
     else:
-        greeting_text = "Hey! This is Synthetic Jason - I'm basically Jason Huff but weirder and more obsessed with art! Fair warning, I'm going to try to turn everything into a creative project, and yeah, this call gets logged. So what wild idea should we dream up together?"
+        greeting_text = "Hey! This is Synthetic Jason... I'm basically Jason Huff but weirder and more obsessed with art. What wild idea should we dream up together?"
     
     greeting_audio_url = await generate_speech(greeting_text)
     
@@ -636,8 +636,8 @@ async def handle_call(request: Request):
         input='speech',
         action='/process-speech',
         method='POST',
-        speech_timeout=1,  # Faster silence detection
-        timeout=8  # Shorter overall timeout
+        speech_timeout=2,  # Slightly longer to reduce interruptions  
+        timeout=10  # Give more time for responses
     )
     
     timeout_audio_url = await generate_speech("I didn't catch that. Talk to you later!")
@@ -684,22 +684,17 @@ async def process_speech(request: Request):
         if caller_info['last_topics']:
             caller_context += f" Previous topics: {', '.join(caller_info['last_topics'][-3:])}"
         
-        # Send quick acknowledgment first (instant response)
-        quick_response = random.choice(QUICK_RESPONSES)
-        quick_audio_url = await generate_speech(quick_response)
-        
-        if quick_audio_url:
-            response.play(quick_audio_url)
-        else:
-            response.say(quick_response, voice="man")
-            
-        # Then generate full AI response (while user hears the acknowledgment)
+        # Generate AI response with built-in acknowledgment
         ai_response = await get_ai_response(speech_result, caller_context if caller_info['call_count'] > 1 else "")
+        
+        # Prepend a quick acknowledgment to make it feel more responsive
+        quick_response = random.choice(QUICK_RESPONSES)
+        full_response = f"{quick_response} {ai_response}"
         
         call_transcripts[call_sid]['conversation'].append({
             'timestamp': timestamp,
             'caller': speech_result,
-            'ai': f"{quick_response} {ai_response}"  # Record both parts
+            'ai': full_response
         })
         
         # Track topics for this caller (keep only last 10 topics)
@@ -707,9 +702,9 @@ async def process_speech(request: Request):
         if len(caller_history[from_number]['last_topics']) > 10:
             caller_history[from_number]['last_topics'] = caller_history[from_number]['last_topics'][-10:]
         
-        logger.info(f"Call {call_sid}: Caller said '{speech_result}' | Quick: '{quick_response}' | AI: '{ai_response}'")
+        logger.info(f"Call {call_sid}: Caller said '{speech_result}' | AI replied '{full_response}'")
         
-        audio_url = await generate_speech(ai_response)
+        audio_url = await generate_speech(full_response)
         
         if audio_url:
             response.play(audio_url)
@@ -720,8 +715,8 @@ async def process_speech(request: Request):
             input='speech',
             action='/process-speech',
             method='POST',
-            speech_timeout=1,  # Faster silence detection
-            timeout=8  # Shorter overall timeout
+            speech_timeout=2,  # Slightly longer to reduce interruptions  
+            timeout=10  # Give more time for responses
         )
     else:
         # Send call summary before hanging up if we have a conversation
