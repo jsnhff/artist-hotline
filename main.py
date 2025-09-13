@@ -1104,6 +1104,200 @@ async def handle_coqui_stream(websocket: WebSocket):
             cleanup_transcription_stream(stream_sid)
             logger.info(f"Coqui stream cleanup completed for {stream_sid}")
 
+
+# ===== STATIC KILLER TEST SYSTEM =====
+# Non-destructive testing system for eliminating audio static
+# Runs alongside production system without affecting it
+
+@app.post("/test-static-killer")
+async def test_static_killer_endpoint(request: Request):
+    """
+    Test endpoint for Static Killer audio conversion.
+    Generate a sample audio file using proven FFmpeg pipeline.
+    """
+    try:
+        from static_killer import convert_wav_static_free, save_test_audio
+        from simple_tts import generate_simple_speech
+        
+        # Generate test audio using Simple TTS
+        test_text = "Testing the Static Killer system. This should be crystal clear audio without any static or noise."
+        wav_data = await generate_simple_speech(test_text)
+        
+        if not wav_data:
+            return {"error": "Failed to generate test audio"}
+        
+        # Convert using Static Killer FFmpeg pipeline
+        raw_mulaw = await convert_wav_static_free(wav_data)
+        
+        if not raw_mulaw:
+            return {"error": "Static Killer conversion failed - check FFmpeg installation"}
+        
+        # Save test file for Audacity validation
+        test_file = "/tmp/static_killer_test.ulaw"
+        success = await save_test_audio(wav_data, test_file)
+        
+        return {
+            "status": "success",
+            "message": "Static Killer conversion completed",
+            "original_wav_bytes": len(wav_data),
+            "converted_mulaw_bytes": len(raw_mulaw),
+            "test_file": test_file if success else None,
+            "audacity_instructions": {
+                "1": "Open Audacity",
+                "2": "File → Import → Raw Data",
+                "3": f"Select: {test_file}",
+                "4": "Set: Encoding=μ-law, Sample rate=8000, Channels=Mono", 
+                "5": "Click Import and play - should be crystal clear!"
+            }
+        }
+        
+    except ImportError as e:
+        return {"error": f"Static Killer not available: {e}"}
+    except Exception as e:
+        logger.error(f"Static Killer test failed: {e}")
+        return {"error": str(e)}
+
+@app.websocket("/static-killer-stream")
+async def static_killer_stream(websocket: WebSocket):
+    """
+    WebSocket endpoint for testing static-free Twilio streaming.
+    Uses FFmpeg pipeline instead of Python audioop conversion.
+    """
+    stream_sid = None
+    call_sid = None
+    
+    try:
+        from static_killer import convert_wav_static_free, chunk_for_streaming, create_media_payload
+        from simple_tts import generate_simple_speech
+        
+        await websocket.accept()
+        logger.info("🔪 Static Killer WebSocket accepted")
+        
+        while True:
+            message = await websocket.receive_text()
+            data = json.loads(message)
+            logger.debug(f"Static Killer received: {data['event']}")
+            
+            if data['event'] == 'connected':
+                logger.info("✅ Static Killer Media stream connected")
+                
+            elif data['event'] == 'start':
+                stream_sid = data['start']['streamSid']
+                call_sid = data['start']['callSid']
+                logger.info(f"🚀 Static Killer stream started: {stream_sid} for call {call_sid}")
+                
+                # Send greeting using Static Killer conversion
+                greeting_text = "Hello! This is the Static Killer system. The audio should be crystal clear without any static or noise."
+                
+                try:
+                    # Generate speech
+                    wav_data = await generate_simple_speech(greeting_text)
+                    if not wav_data:
+                        logger.error("❌ Failed to generate greeting audio")
+                        continue
+                    
+                    # Convert using Static Killer FFmpeg pipeline  
+                    raw_mulaw = await convert_wav_static_free(wav_data)
+                    if not raw_mulaw:
+                        logger.error("❌ Static Killer conversion failed")
+                        continue
+                    
+                    # Chunk for optimal streaming
+                    chunks = chunk_for_streaming(raw_mulaw)
+                    
+                    # Stream each chunk with proper timing
+                    for i, chunk in enumerate(chunks):
+                        payload = create_media_payload(chunk, stream_sid)
+                        await websocket.send_text(json.dumps(payload))
+                        
+                        # Delay for proper streaming (160ms per chunk)
+                        await asyncio.sleep(0.16)
+                    
+                    logger.info(f"✅ Static Killer: Streamed {len(chunks)} chunks ({len(raw_mulaw)} total bytes)")
+                    
+                except Exception as e:
+                    logger.error(f"❌ Static Killer greeting failed: {e}")
+                
+            elif data['event'] == 'media':
+                # Could process incoming audio here for bidirectional testing
+                logger.debug("📥 Static Killer received audio (not processed in test)")
+                
+            elif data['event'] == 'closed':
+                logger.info(f"🔪 Static Killer stream closed: {stream_sid}")
+                break
+                
+    except WebSocketDisconnect:
+        logger.info("Static Killer WebSocket disconnected")
+    except ImportError:
+        logger.error("❌ Static Killer dependencies not available")
+        await websocket.close()
+    except Exception as e:
+        logger.error(f"Static Killer stream error: {e}")
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
+
+@app.post("/test-audio-play") 
+async def test_audio_play_endpoint():
+    """
+    Test endpoint that generates audio file for <Play> testing.
+    Use this to verify audio quality before streaming tests.
+    """
+    try:
+        from simple_tts import generate_simple_speech
+        import tempfile
+        
+        # Generate test audio
+        test_text = "This is a direct audio playback test. If you hear static here, the issue is in audio generation, not streaming."
+        wav_data = await generate_simple_speech(test_text)
+        
+        if not wav_data:
+            return {"error": "Failed to generate audio"}
+        
+        # Save as temporary file
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
+            f.write(wav_data)
+            temp_path = f.name
+        
+        return {
+            "status": "success",
+            "message": "Test audio generated",
+            "file_size": len(wav_data),
+            "temp_file": temp_path,
+            "twiml_test": f'<Response><Play>{config.BASE_URL}/audio/test</Play></Response>',
+            "instructions": "Use this in TwiML to test direct playback (bypass streaming)"
+        }
+        
+    except Exception as e:
+        logger.error(f"Audio play test failed: {e}")
+        return {"error": str(e)}
+
+@app.api_route("/static-killer-voice", methods=["GET", "POST"])  
+async def static_killer_voice_handler(request: Request):
+    """
+    TwiML handler for Static Killer testing.
+    Use this as your Twilio webhook URL to test the static-free system.
+    """
+    try:
+        response = VoiceResponse()
+        
+        # Add a simple greeting and connect to Static Killer stream
+        response.say("Connecting to Static Killer test system...")
+        
+        # Connect to Static Killer WebSocket
+        connect = response.connect()
+        ws_url = config.BASE_URL.replace("https://", "wss://").replace("http://", "ws://")
+        stream_url = f"{ws_url}/static-killer-stream"
+        connect.stream(url=stream_url)
+        
+        logger.info("📞 Static Killer call initiated")
+        return Response(content=str(response), media_type="application/xml")
+        
+    except Exception as e:
+        logger.error(f"Static Killer voice handler error: {e}")
+        response = VoiceResponse()
+        response.say("Sorry, the Static Killer test system is not available.")
+        return Response(content=str(response), media_type="application/xml")
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))

@@ -126,3 +126,5 @@ ngrok.yml
 # Testing artifacts
 test_audio/
 audio_samples/
+static_killer_test.*
+*.ulaw
