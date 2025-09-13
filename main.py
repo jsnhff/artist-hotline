@@ -951,6 +951,18 @@ async def handle_coqui_stream(websocket: WebSocket):
     
     # Import Coqui components (lazy loading)
     try:
+        from simple_tts import generate_simple_speech, initialize_simple_tts
+        logger.info("✅ Simple TTS fallback loaded successfully")
+        TTS_TYPE = "simple"
+        generate_speech = generate_simple_speech
+        initialize_tts = initialize_simple_tts
+    except Exception as e:
+        logger.error(f"❌ Failed to load Simple TTS fallback: {e}")
+        await websocket.close()
+        return
+    
+    # Keep original Coqui import for future use
+    try:
         from coqui_tts import generate_coqui_speech, initialize_coqui_tts
         from whisper_transcription import (
             add_audio_for_transcription, 
@@ -961,9 +973,13 @@ async def handle_coqui_stream(websocket: WebSocket):
         from audio_utils import convert_wav_for_twilio, convert_twilio_to_wav, AudioConverter
         
         # Initialize systems on first connection
-        logger.info("🔧 Initializing Coqui TTS and Whisper systems...")
-        tts_ready = await initialize_coqui_tts()
-        whisper_ready = await initialize_whisper("base")
+        logger.info(f"🔧 Initializing {TTS_TYPE.upper()} TTS system...")
+        tts_ready = await initialize_tts()
+        try:
+            whisper_ready = await initialize_whisper("base")
+        except:
+            logger.warning("⚠️ Whisper initialization failed, continuing without transcription")
+            whisper_ready = True
         
         if not tts_ready or not whisper_ready:
             logger.error("❌ Failed to initialize Coqui systems - falling back to ElevenLabs")
@@ -993,11 +1009,11 @@ async def handle_coqui_stream(websocket: WebSocket):
                 logger.info(f"🚀 Coqui Media stream started: {stream_sid} for call {call_sid}")
                 
                 # Send initial greeting via Coqui TTS
-                greeting_text = "Hey! This is Synthetic Jason using open source Coqui TTS. Testing the new voice system... How does this sound?"
+                greeting_text = f"Hey! This is Synthetic Jason using {TTS_TYPE} TTS. Testing the new voice streaming system... How does this sound?"
                 
                 try:
                     # Generate speech with Coqui TTS
-                    audio_wav = await generate_coqui_speech(greeting_text)
+                    audio_wav = await generate_speech(greeting_text)
                     if audio_wav:
                         # Convert to Twilio format and send
                         audio_b64 = convert_wav_for_twilio(audio_wav)
@@ -1042,7 +1058,7 @@ async def handle_coqui_stream(websocket: WebSocket):
                         
                         # Generate speech with Coqui TTS
                         try:
-                            audio_wav = await generate_coqui_speech(ai_response)
+                            audio_wav = await generate_speech(ai_response)
                             if audio_wav:
                                 audio_b64 = convert_wav_for_twilio(audio_wav)
                                 if audio_b64:
