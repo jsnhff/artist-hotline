@@ -1,15 +1,13 @@
-# Core dependencies for production
-fastapi>=0.104.0
-uvicorn[standard]>=0.24.0
+# VoIP and audio processing (must be first - has strict version requirements)
+vocode==0.1.108
+
+# Core dependencies for production (compatible with vocode)
 python-dotenv>=1.0.0
 twilio>=8.10.0
 httpx>=0.25.0
 websockets>=12.0
 openai>=1.3.0
 numpy>=1.24.0
-
-# VoIP and audio processing  
-vocode==0.1.108
 
 # Optional dependencies for development/testing
 # Simple TTS fallback (install manually if needed)
