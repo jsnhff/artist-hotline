@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """
-Audio Format Conversion Utilities
-Handles conversion between different audio formats for Twilio Media Streams
+Audio format conversion utilities for Twilio Media Streams.
+
+This module handles conversion between different audio formats, specifically
+focusing on the conversion between WAV/PCM and μ-law formats required by
+Twilio's Media Streams API.
 """
-import io
-import wave
-import logging
+
 import base64
+import io
+import logging
+import wave
 from typing import Optional
 
 # Audio processing imports
@@ -15,7 +19,13 @@ try:
     AUDIOOP_AVAILABLE = True
 except ImportError:
     AUDIOOP_AVAILABLE = False
-    logging.warning("audioop not available - limited audio conversion")
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 try:
     import numpy as np

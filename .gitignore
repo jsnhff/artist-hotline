@@ -106,3 +106,23 @@ logs/
 # Temporary files
 tmp/
 temp/
+
+# Project specific
+# Audio cache files
+*.wav
+*.mp3
+*.aiff
+
+# Model files (large ML models)
+models/
+*.pth
+*.pt
+
+# Development artifacts  
+package-lock.json
+.ngrok2/
+ngrok.yml
+
+# Testing artifacts
+test_audio/
+audio_samples/

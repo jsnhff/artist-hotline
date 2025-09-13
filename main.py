@@ -1,57 +1,72 @@
-import os
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, Response
-from dotenv import load_dotenv
-import logging
-from twilio.twiml.voice_response import VoiceResponse
-from twilio.rest import Client
-import openai
-import httpx
-import hashlib
+# Standard library imports
 import asyncio
-from datetime import datetime
-import json
-import random
-import websockets
 import base64
+import hashlib
+import json
+import logging
+import os
+import random
 import time
 from collections import deque
+from datetime import datetime
+from typing import Dict, List, Optional
+
+# Third-party imports
+import httpx
+import openai
+import websockets
+from dotenv import load_dotenv
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse, Response
+from twilio.rest import Client
+from twilio.twiml.voice_response import VoiceResponse
 
 # Load environment variables
 load_dotenv()
 
-logging.basicConfig()
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
 
-app = FastAPI()
+# FastAPI app
+app = FastAPI(title="Artist Hotline Voice Agent", version="1.0.0")
 
-# Environment variables
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-ELEVEN_LABS_API_KEY = os.getenv("ELEVEN_LABS_API_KEY")
-ELEVEN_LABS_VOICE_ID = os.getenv("ELEVEN_LABS_VOICE_ID")
-TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
-TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
-TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
-YOUR_PHONE_NUMBER = os.getenv("YOUR_PHONE_NUMBER")
-BASE_URL = os.getenv("BASE_URL", "https://your-app-url.com")
-USE_STREAMING = os.getenv("USE_STREAMING", "false").lower() == "true"
-USE_COQUI_TEST = os.getenv("USE_COQUI_TEST", "false").lower() == "true"
+# Configuration from environment
+class Config:
+    # API Keys
+    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+    ELEVEN_LABS_API_KEY: str = os.getenv("ELEVEN_LABS_API_KEY", "")
+    ELEVEN_LABS_VOICE_ID: str = os.getenv("ELEVEN_LABS_VOICE_ID", "")
+    
+    # Twilio Configuration
+    TWILIO_ACCOUNT_SID: str = os.getenv("TWILIO_ACCOUNT_SID", "")
+    TWILIO_AUTH_TOKEN: str = os.getenv("TWILIO_AUTH_TOKEN", "")
+    TWILIO_PHONE_NUMBER: str = os.getenv("TWILIO_PHONE_NUMBER", "")
+    YOUR_PHONE_NUMBER: str = os.getenv("YOUR_PHONE_NUMBER", "")
+    
+    # App Configuration
+    BASE_URL: str = os.getenv("BASE_URL", "https://artist-hotline-production.up.railway.app")
+    PORT: int = int(os.getenv("PORT", "8000"))
+    
+    # Feature Flags
+    USE_STREAMING: bool = os.getenv("USE_STREAMING", "false").lower() == "true"
+    USE_COQUI_TEST: bool = os.getenv("USE_COQUI_TEST", "false").lower() == "true"
+
+config = Config()
 
 # Configure OpenAI
-openai.api_key = OPENAI_API_KEY
+openai.api_key = config.OPENAI_API_KEY
 
 # Initialize Twilio client
-twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+twilio_client = Client(config.TWILIO_ACCOUNT_SID, config.TWILIO_AUTH_TOKEN)
 
-# Store audio in memory (simple cache)
-audio_cache = {}
-
-# Store call transcripts
-call_transcripts = {}
-
-# Store caller history
-caller_history = {}
+# Global state management
+audio_cache: Dict[str, bytes] = {}
+call_transcripts: Dict[str, List[str]] = {}
+caller_history: Dict[str, Dict] = {}
 
 # Connection manager for WebSocket streams
 class ConnectionManager:
@@ -104,15 +119,15 @@ async def health_check():
 async def streaming_health_check():
     """Check if streaming configuration is valid"""
     health_status = {
-        "streaming_enabled": USE_STREAMING,
-        "base_url": BASE_URL,
-        "elevenlabs_configured": bool(ELEVEN_LABS_API_KEY and ELEVEN_LABS_VOICE_ID),
+        "streaming_enabled": config.USE_STREAMING,
+        "base_url": config.BASE_URL,
+        "elevenlabs_configured": bool(config.ELEVEN_LABS_API_KEY and config.ELEVEN_LABS_VOICE_ID),
         "websocket_url": None,
         "status": "unknown"
     }
     
-    if USE_STREAMING:
-        ws_url = BASE_URL.replace("https://", "wss://").replace("http://", "ws://")
+    if config.USE_STREAMING:
+        ws_url = config.BASE_URL.replace("https://", "wss://").replace("http://", "ws://")
         health_status["websocket_url"] = f"{ws_url}/media-stream"
         
         if health_status["elevenlabs_configured"]:
@@ -152,12 +167,12 @@ async def root():
 async def generate_speech_with_elevenlabs(text: str) -> str:
     try:
         text_hash = hashlib.md5(text.encode()).hexdigest()
-        url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVEN_LABS_VOICE_ID}"
+        url = f"https://api.elevenlabs.io/v1/text-to-speech/{config.ELEVEN_LABS_VOICE_ID}"
         
         headers = {
             "Accept": "audio/mpeg",
             "Content-Type": "application/json",
-            "xi-api-key": ELEVEN_LABS_API_KEY
+            "xi-api-key": config.ELEVEN_LABS_API_KEY
         }
         
         data = {
@@ -178,7 +193,7 @@ async def generate_speech_with_elevenlabs(text: str) -> str:
             if response.status_code == 200:
                 audio_data = response.content
                 audio_cache[text_hash] = audio_data
-                return f"{BASE_URL}/audio/{text_hash}"
+                return f"{config.BASE_URL}/audio/{text_hash}"
             else:
                 logger.error(f"ElevenLabs API error: {response.status_code}")
                 return None
@@ -196,10 +211,10 @@ async def generate_speech_with_elevenlabs_streaming(text: str) -> str:
         
         # Check cache first
         if text_hash in audio_cache:
-            return f"{BASE_URL}/audio/{text_hash}"
+            return f"{config.BASE_URL}/audio/{text_hash}"
         
         # WebSocket streaming connection
-        uri = f"wss://api.elevenlabs.io/v1/text-to-speech/{ELEVEN_LABS_VOICE_ID}/stream-input"
+        uri = f"wss://api.elevenlabs.io/v1/text-to-speech/{config.ELEVEN_LABS_VOICE_ID}/stream-input"
         
         try:
             async with websockets.connect(uri) as websocket:
@@ -212,7 +227,7 @@ async def generate_speech_with_elevenlabs_streaming(text: str) -> str:
                         "style": 0.0,
                         "use_speaker_boost": True
                     },
-                    "xi_api_key": ELEVEN_LABS_API_KEY
+                    "xi_api_key": config.ELEVEN_LABS_API_KEY
                 }
                 await websocket.send(json.dumps(init_message))
                 
@@ -239,7 +254,7 @@ async def generate_speech_with_elevenlabs_streaming(text: str) -> str:
                     full_audio = b''.join(audio_chunks)
                     audio_cache[text_hash] = full_audio
                     logger.info(f"Streaming TTS generated {len(full_audio)} bytes for text: {text[:50]}...")
-                    return f"{BASE_URL}/audio/{text_hash}"
+                    return f"{config.BASE_URL}/audio/{text_hash}"
                 else:
                     logger.error("No audio chunks received from streaming")
                     return None
@@ -254,7 +269,7 @@ async def generate_speech_with_elevenlabs_streaming(text: str) -> str:
 
 async def generate_speech(text: str) -> str:
     """Hybrid approach: Use streaming TTS for speed, fallback to REST for reliability"""
-    if USE_STREAMING:
+    if config.USE_STREAMING:
         logger.info("Using hybrid streaming TTS (streaming generation, cached playback)")
         result = await generate_speech_with_elevenlabs_streaming(text)
         if result:
@@ -277,7 +292,7 @@ async def stream_speech_to_twilio(text: str, twilio_websocket: WebSocket, stream
         logger.info(f"Starting ElevenLabs streaming for: '{text[:50]}...'")
         
         # WebSocket streaming connection to ElevenLabs
-        uri = f"wss://api.elevenlabs.io/v1/text-to-speech/{ELEVEN_LABS_VOICE_ID}/stream-input"
+        uri = f"wss://api.elevenlabs.io/v1/text-to-speech/{config.ELEVEN_LABS_VOICE_ID}/stream-input"
         logger.debug(f"Connecting to ElevenLabs: {uri}")
         
         async with websockets.connect(uri) as elevenlabs_ws:
@@ -294,7 +309,7 @@ async def stream_speech_to_twilio(text: str, twilio_websocket: WebSocket, stream
                 "generation_config": {
                     "chunk_length_schedule": [120, 160, 250, 290]
                 },
-                "xi_api_key": ELEVEN_LABS_API_KEY
+                "xi_api_key": config.ELEVEN_LABS_API_KEY
             }
             logger.debug("Sending ElevenLabs init message")
             await elevenlabs_ws.send(json.dumps(init_message))
@@ -568,7 +583,7 @@ async def get_ai_response(user_input: str, caller_context: str = "") -> str:
 @app.api_route("/voice", methods=["GET", "POST"])
 async def handle_call(request: Request):
     # Route to Coqui test system if enabled
-    if USE_COQUI_TEST:
+    if config.USE_COQUI_TEST:
         logger.info("🧪 Using Coqui TTS test system")
         return await handle_coqui_call(request)
     else:
@@ -650,7 +665,7 @@ async def handle_elevenlabs_call(request: Request):
 @app.api_route("/process-speech", methods=["POST"])
 async def process_speech(request: Request):
     """Route speech processing based on system type"""
-    if USE_COQUI_TEST:
+    if config.USE_COQUI_TEST:
         return await process_speech_coqui(request)
     else:
         return await process_speech_elevenlabs(request)
@@ -785,7 +800,7 @@ async def handle_coqui_call(request: Request):
     
     # For now, use Media Streams for bidirectional real-time audio
     connect = response.connect()
-    ws_url = BASE_URL.replace("https://", "wss://").replace("http://", "ws://")
+    ws_url = config.BASE_URL.replace("https://", "wss://").replace("http://", "ws://")
     stream_url = f"{ws_url}/coqui-stream"
     logger.info(f"Connecting to Coqui Media Stream: {stream_url}")
     connect.stream(url=stream_url)

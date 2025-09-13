@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """
-Coqui TTS Handler with XTTS-v2 Voice Cloning
-Real-time streaming TTS for the artist hotline test system
+Coqui TTS integration for voice synthesis using XTTS-v2 model.
+
+This module provides voice cloning and multilingual TTS capabilities using
+the Coqui TTS library. It's designed as an optional enhancement that can
+be enabled via the USE_COQUI_TEST environment variable.
 """
-import os
+
 import asyncio
-import logging
 import base64
-import io
-import wave
+import logging
+import os
 import tempfile
 from pathlib import Path
 from typing import Optional, AsyncGenerator
@@ -20,8 +22,12 @@ try:
     COQUI_AVAILABLE = True
 except ImportError:
     COQUI_AVAILABLE = False
-    logging.warning("Coqui TTS not available - install with: pip install TTS")
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 class CoquiTTSHandler:

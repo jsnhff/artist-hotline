@@ -1,14 +1,25 @@
-vocode==0.1.108
-python-dotenv
-twilio
-httpx
-websockets
+# Core dependencies for production
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-dotenv>=1.0.0
+twilio>=8.10.0
+httpx>=0.25.0
+websockets>=12.0
+openai>=1.3.0
 numpy>=1.24.0
 
-# Coqui TTS Test System Dependencies (optional - only needed when USE_COQUI_TEST=true)
-# Install these manually when testing: pip install TTS torch faster-whisper
-# TTS>=0.22.0
-# faster-whisper>=1.0.0
-# torch>=2.0.0
-# Note: audioop is built-in to Python but will be deprecated
-# For future compatibility, consider: audioop-lts
+# VoIP and audio processing  
+vocode==0.1.108
+
+# Optional dependencies for development/testing
+# Simple TTS fallback (install manually if needed)
+# pyttsx3>=2.90
+
+# Coqui TTS Test System Dependencies (install manually when USE_COQUI_TEST=true)
+# These are heavy dependencies that can cause Railway build timeouts
+# pip install TTS>=0.22.0 torch>=2.0.0 faster-whisper>=1.0.0
+
+# Development tools (not needed for production)
+# black>=23.0.0
+# flake8>=6.0.0
+# mypy>=1.7.0

@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """
-Simple TTS fallback using pyttsx3 for testing the streaming pipeline
+Simple TTS fallback using pyttsx3 for local development and testing.
+
+This module provides a lightweight Text-to-Speech system using the system's
+built-in voices via pyttsx3, primarily used as a fallback when Coqui TTS
+dependencies are not available.
 """
+
 import asyncio
 import logging
-import io
-import wave
-import tempfile
 import os
+import tempfile
 from pathlib import Path
 from typing import Optional, AsyncGenerator
 
@@ -17,14 +20,25 @@ try:
     PYTTSX3_AVAILABLE = True
 except ImportError:
     PYTTSX3_AVAILABLE = False
-    logging.warning("pyttsx3 not available - install with: pip install pyttsx3")
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 class SimpleTTSHandler:
+    """
+    A simple Text-to-Speech handler using pyttsx3.
+    
+    Provides audio generation using the system's built-in TTS voices,
+    with proper audio format conversion for Twilio Media Streams compatibility.
+    """
+    
     def __init__(self):
         self.engine = None
-        logger.info(f"🗣️ Initializing Simple TTS handler")
+        logger.info("🗣️ Initializing Simple TTS handler")
         
     async def initialize(self, speaker_wav_path: Optional[str] = None):
         """Initialize the TTS engine asynchronously"""
