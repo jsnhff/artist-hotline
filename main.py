@@ -36,6 +36,7 @@ TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
 YOUR_PHONE_NUMBER = os.getenv("YOUR_PHONE_NUMBER")
 BASE_URL = os.getenv("BASE_URL", "https://your-app-url.com")
 USE_STREAMING = os.getenv("USE_STREAMING", "false").lower() == "true"
+USE_COQUI_TEST = os.getenv("USE_COQUI_TEST", "false").lower() == "true"
 
 # Configure OpenAI
 openai.api_key = OPENAI_API_KEY
@@ -566,6 +567,16 @@ async def get_ai_response(user_input: str, caller_context: str = "") -> str:
 
 @app.api_route("/voice", methods=["GET", "POST"])
 async def handle_call(request: Request):
+    # Route to Coqui test system if enabled
+    if USE_COQUI_TEST:
+        logger.info("🧪 Using Coqui TTS test system")
+        return await handle_coqui_call(request)
+    else:
+        logger.info("🎵 Using ElevenLabs production system")
+        return await handle_elevenlabs_call(request)
+
+async def handle_elevenlabs_call(request: Request):
+    """Original ElevenLabs-based call handling (production system)"""
     form_data = await request.form()
     from_number = form_data.get('From', 'unknown')
     call_sid = form_data.get('CallSid', 'unknown')
@@ -598,20 +609,7 @@ async def handle_call(request: Request):
     else:
         caller_history[from_number]['call_count'] += 1
     
-    # DISABLED: Complex WebSocket system - using hybrid approach instead
-    # if USE_STREAMING:
-    #     logger.info(f"Using Media Streams for real-time conversation: {call_sid}")
-    #     
-    #     # Connect to WebSocket stream for bidirectional audio
-    #     connect = response.connect()
-    #     ws_url = BASE_URL.replace("https://", "wss://").replace("http://", "ws://")
-    #     stream_url = f"{ws_url}/media-stream"
-    #     logger.info(f"Connecting to Media Stream: {stream_url}")
-    #     connect.stream(url=stream_url)
-    #     
-    #     return HTMLResponse(content=str(response), media_type="application/xml")
-    
-    # Traditional approach for non-streaming calls
+    # Traditional approach for ElevenLabs calls
     if from_number in caller_history:
         caller_info = caller_history[from_number]
         call_count = caller_info['call_count']
@@ -634,7 +632,7 @@ async def handle_call(request: Request):
     
     gather = response.gather(
         input='speech',
-        action='/process-speech',
+        action='/process-speech-elevenlabs',  # Route to ElevenLabs processor
         method='POST',
         speech_timeout=2,  # Slightly longer to reduce interruptions  
         timeout=10  # Give more time for responses
@@ -651,6 +649,14 @@ async def handle_call(request: Request):
 
 @app.api_route("/process-speech", methods=["POST"])
 async def process_speech(request: Request):
+    """Route speech processing based on system type"""
+    if USE_COQUI_TEST:
+        return await process_speech_coqui(request)
+    else:
+        return await process_speech_elevenlabs(request)
+
+@app.api_route("/process-speech-elevenlabs", methods=["POST"])
+async def process_speech_elevenlabs(request: Request):
     form_data = await request.form()
     speech_result = form_data.get('SpeechResult', '')
     call_sid = form_data.get('CallSid', 'unknown')
@@ -713,7 +719,7 @@ async def process_speech(request: Request):
         
         gather = response.gather(
             input='speech',
-            action='/process-speech',
+            action='/process-speech-elevenlabs',  # Route to ElevenLabs processor
             method='POST',
             speech_timeout=2,  # Slightly longer to reduce interruptions  
             timeout=10  # Give more time for responses
@@ -762,6 +768,35 @@ async def handle_call_status(request: Request):
             await send_call_summary_sms(from_number, call_sid)
     
     return {"status": "received"}
+
+# ================================
+# COQUI TTS TEST SYSTEM 
+# ================================
+
+async def handle_coqui_call(request: Request):
+    """Coqui TTS-based call handling (test system)"""
+    form_data = await request.form()
+    from_number = form_data.get('From', 'unknown')
+    call_sid = form_data.get('CallSid', 'unknown')
+    
+    logger.info(f"🧪 Starting Coqui test call from {from_number}")
+    
+    response = VoiceResponse()
+    
+    # For now, use Media Streams for bidirectional real-time audio
+    connect = response.connect()
+    ws_url = BASE_URL.replace("https://", "wss://").replace("http://", "ws://")
+    stream_url = f"{ws_url}/coqui-stream"
+    logger.info(f"Connecting to Coqui Media Stream: {stream_url}")
+    connect.stream(url=stream_url)
+    
+    return HTMLResponse(content=str(response), media_type="application/xml")
+
+async def process_speech_coqui(request: Request):
+    """Coqui-based speech processing (placeholder)"""
+    # This will be used if we fallback to traditional TwiML approach
+    # For now, redirect to Media Streams
+    return await handle_coqui_call(request)
 
 @app.websocket("/media-stream")
 async def handle_media_stream(websocket: WebSocket):
@@ -907,6 +942,136 @@ async def handle_media_stream(websocket: WebSocket):
             # Clean up audio buffer
             if stream_sid in audio_buffers:
                 del audio_buffers[stream_sid]
+
+@app.websocket("/coqui-stream")
+async def handle_coqui_stream(websocket: WebSocket):
+    """Handle Twilio Media Streams for Coqui TTS system"""
+    stream_sid = None
+    call_sid = None
+    
+    # Import Coqui components (lazy loading)
+    try:
+        from coqui_tts import generate_coqui_speech, initialize_coqui_tts
+        from whisper_transcription import (
+            add_audio_for_transcription, 
+            get_transcription, 
+            cleanup_transcription_stream,
+            initialize_whisper
+        )
+        from audio_utils import convert_wav_for_twilio, convert_twilio_to_wav, AudioConverter
+        
+        # Initialize systems on first connection
+        logger.info("🔧 Initializing Coqui TTS and Whisper systems...")
+        tts_ready = await initialize_coqui_tts()
+        whisper_ready = await initialize_whisper("base")
+        
+        if not tts_ready or not whisper_ready:
+            logger.error("❌ Failed to initialize Coqui systems - falling back to ElevenLabs")
+            # Could redirect to ElevenLabs system here
+            return
+            
+    except ImportError as e:
+        logger.error(f"❌ Coqui dependencies not available: {e}")
+        logger.error("Install with: pip install TTS faster-whisper torch numpy")
+        return
+    
+    try:
+        await websocket.accept()
+        logger.info("🧪 Coqui Media stream WebSocket accepted")
+        
+        while True:
+            message = await websocket.receive_text()
+            data = json.loads(message)
+            logger.debug(f"Coqui stream received: {data.get('event', 'unknown')}")
+            
+            if data['event'] == 'connected':
+                logger.info("✅ Coqui Media stream connected")
+                
+            elif data['event'] == 'start':
+                stream_sid = data['start']['streamSid']
+                call_sid = data['start']['callSid']
+                logger.info(f"🚀 Coqui Media stream started: {stream_sid} for call {call_sid}")
+                
+                # Send initial greeting via Coqui TTS
+                greeting_text = "Hey! This is Synthetic Jason using open source Coqui TTS. Testing the new voice system... How does this sound?"
+                
+                try:
+                    # Generate speech with Coqui TTS
+                    audio_wav = await generate_coqui_speech(greeting_text)
+                    if audio_wav:
+                        # Convert to Twilio format and send
+                        audio_b64 = convert_wav_for_twilio(audio_wav)
+                        if audio_b64:
+                            media_message = {
+                                "event": "media",
+                                "streamSid": stream_sid,
+                                "media": {"payload": audio_b64}
+                            }
+                            await websocket.send_text(json.dumps(media_message))
+                            logger.info("✅ Coqui greeting sent successfully")
+                        else:
+                            logger.error("❌ Failed to convert Coqui audio for Twilio")
+                    else:
+                        logger.error("❌ Coqui TTS failed to generate greeting")
+                except Exception as tts_error:
+                    logger.error(f"❌ Coqui TTS error: {tts_error}")
+                
+            elif data['event'] == 'media':
+                # Extract stream_sid from media event if we don't have it
+                if not stream_sid:
+                    stream_sid = data.get('streamSid')
+                    logger.info(f"🔍 Extracted stream_sid: {stream_sid}")
+                
+                # Receive μ-law audio from Twilio (8kHz, base64)
+                audio_payload = data['media']['payload']
+                mulaw_data = base64.b64decode(audio_payload)
+                
+                # Convert to PCM for Whisper
+                pcm_data = AudioConverter.mulaw_to_pcm(mulaw_data)
+                if pcm_data:
+                    # Add to transcription buffer
+                    add_audio_for_transcription(stream_sid, pcm_data, 8000)
+                    
+                    # Check for transcription
+                    transcription = await get_transcription(stream_sid, 8000)
+                    if transcription:
+                        logger.info(f"🎤 Transcribed: '{transcription}'")
+                        
+                        # Generate AI response (reuse existing logic)
+                        ai_response = await get_ai_response(transcription)
+                        
+                        # Generate speech with Coqui TTS
+                        try:
+                            audio_wav = await generate_coqui_speech(ai_response)
+                            if audio_wav:
+                                audio_b64 = convert_wav_for_twilio(audio_wav)
+                                if audio_b64:
+                                    media_message = {
+                                        "event": "media",
+                                        "streamSid": stream_sid,
+                                        "media": {"payload": audio_b64}
+                                    }
+                                    await websocket.send_text(json.dumps(media_message))
+                                    logger.info(f"✅ Coqui response sent: '{ai_response[:50]}...'")
+                        except Exception as response_error:
+                            logger.error(f"❌ Failed to generate Coqui response: {response_error}")
+                
+                logger.debug(f"Processed Coqui audio chunk: {len(mulaw_data)} μ-law bytes")
+                
+            elif data['event'] == 'closed':
+                logger.info(f"Coqui Media stream closed: {stream_sid}")
+                break
+                
+    except WebSocketDisconnect:
+        logger.info("Coqui Media stream WebSocket disconnected")
+    except Exception as e:
+        logger.error(f"Coqui Media stream error: {e}")
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
+    finally:
+        if stream_sid:
+            cleanup_transcription_stream(stream_sid)
+            logger.info(f"Coqui stream cleanup completed for {stream_sid}")
 
 if __name__ == "__main__":
     import uvicorn
