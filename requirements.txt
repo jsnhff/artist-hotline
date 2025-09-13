@@ -2,11 +2,11 @@
 vocode==0.1.108
 
 # Core dependencies for production (compatible with vocode)
-python-dotenv>=1.0.0
-twilio>=8.10.0
-httpx>=0.25.0
-websockets>=12.0
-openai>=1.3.0
+python-dotenv
+twilio
+httpx
+websockets
+openai
 numpy>=1.24.0
 
 # Optional dependencies for development/testing
