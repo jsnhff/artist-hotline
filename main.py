@@ -1595,9 +1595,10 @@ async def test_websocket_debug(websocket: WebSocket):
                         # Generate test audio
                         wav_data = await generate_simple_speech(test_message)
                         if wav_data:
-                            logger.error(f"✅ GENERATED {len(wav_data)} BYTES - SENDING TO TWILIO...")
-                            # Send as base64 WAV
-                            payload = base64.b64encode(wav_data).decode('ascii')
+                            logger.error(f"✅ GENERATED {len(wav_data)} BYTES - CONVERTING TO µ-LAW...")
+                            # Convert to µ-law for Twilio WebSocket
+                            from audio_utils import convert_wav_for_twilio
+                            payload = convert_wav_for_twilio(wav_data)
                             
                             # Send as Twilio media event
                             media_message = {
@@ -1658,7 +1659,9 @@ async def test_websocket_debug(websocket: WebSocket):
                         
                         if wav_data:
                             logger.info(f"✅ Debug: Generated {len(wav_data)} bytes for response")
-                            payload = base64.b64encode(wav_data).decode('ascii')
+                            # Convert to µ-law for Twilio WebSocket
+                            from audio_utils import convert_wav_for_twilio
+                            payload = convert_wav_for_twilio(wav_data)
                             media_message = {
                                 "event": "media",
                                 "streamSid": stream_sid,
