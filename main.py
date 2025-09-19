@@ -164,6 +164,100 @@ async def get_streaming_logs():
 async def root():
     return {"message": "Welcome to Replicant Jason's Voice Hotline", "status": "ready"}
 
+@app.websocket("/ws-test")
+async def websocket_test(websocket: WebSocket):
+    """Minimal WebSocket test for Railway debugging"""
+    try:
+        await websocket.accept()
+        logger.info("✅ Minimal WebSocket connected successfully")
+        
+        await websocket.send_text(json.dumps({
+            "event": "connected",
+            "message": "Minimal WebSocket working on Railway!",
+            "timestamp": time.time()
+        }))
+        
+        while True:
+            try:
+                message = await websocket.receive_text()
+                data = json.loads(message)
+                
+                # Echo back what we received
+                response = {
+                    "event": "echo",
+                    "received": data,
+                    "timestamp": time.time()
+                }
+                await websocket.send_text(json.dumps(response))
+                logger.info(f"✅ WebSocket echoed: {data}")
+                
+            except Exception as e:
+                logger.error(f"WebSocket message error: {e}")
+                break
+                
+    except Exception as e:
+        logger.error(f"WebSocket connection error: {e}")
+    finally:
+        logger.info("WebSocket connection closed")
+
+@app.get("/ws-test-client")
+async def websocket_test_client():
+    """Simple WebSocket client for testing"""
+    html_content = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Test</title>
+</head>
+<body>
+    <h1>Railway WebSocket Test</h1>
+    <div id="messages"></div>
+    <input type="text" id="messageInput" placeholder="Type a message">
+    <button onclick="sendMessage()">Send</button>
+    
+    <script>
+        const ws = new WebSocket('wss://artist-hotline-production.up.railway.app/ws-test');
+        const messages = document.getElementById('messages');
+        
+        ws.onopen = function(event) {
+            addMessage('✅ Connected to WebSocket');
+        };
+        
+        ws.onmessage = function(event) {
+            addMessage('📨 Received: ' + event.data);
+        };
+        
+        ws.onerror = function(error) {
+            addMessage('❌ Error: ' + error);
+        };
+        
+        ws.onclose = function(event) {
+            addMessage('🔌 Connection closed');
+        };
+        
+        function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const message = {
+                type: 'test',
+                content: input.value,
+                timestamp: Date.now()
+            };
+            ws.send(JSON.stringify(message));
+            addMessage('📤 Sent: ' + input.value);
+            input.value = '';
+        }
+        
+        function addMessage(message) {
+            const div = document.createElement('div');
+            div.textContent = new Date().toLocaleTimeString() + ' - ' + message;
+            messages.appendChild(div);
+        }
+    </script>
+</body>
+</html>
+    """
+    return HTMLResponse(content=html_content)
+
 async def generate_speech_with_elevenlabs(text: str) -> str:
     try:
         text_hash = hashlib.md5(text.encode()).hexdigest()
