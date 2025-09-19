@@ -1476,6 +1476,89 @@ async def test_websocket_debug(websocket: WebSocket):
                         "message": f"Coqui test failed: {e}"
                     }))
             
+            elif event == 'connected':
+                logger.info("✅ Debug: Twilio Media Stream connected")
+                
+            elif event == 'start':
+                stream_sid = data['start']['streamSid']
+                call_sid = data['start']['callSid']
+                logger.info(f"🚀 Debug: Media stream started - {stream_sid} for call {call_sid}")
+                
+                # Send initial greeting using Simple TTS
+                greeting_text = "Hello! This is the debug streaming system. I can hear you clearly and respond in real-time. What would you like to talk about?"
+                
+                try:
+                    from simple_tts import initialize_simple_tts, generate_simple_speech
+                    
+                    # Initialize TTS
+                    tts_ready = await initialize_simple_tts()
+                    if tts_ready:
+                        # Generate greeting audio
+                        wav_data = await generate_simple_speech(greeting_text)
+                        if wav_data:
+                            # For now, send as base64 WAV (Simple TTS fallback)
+                            payload = base64.b64encode(wav_data).decode('ascii')
+                            
+                            # Send as Twilio media event
+                            media_message = {
+                                "event": "media",
+                                "streamSid": stream_sid,
+                                "media": {"payload": payload}
+                            }
+                            await websocket.send_text(json.dumps(media_message))
+                            logger.info("✅ Debug: Sent greeting audio")
+                        else:
+                            logger.error("❌ Debug: Failed to generate greeting")
+                    else:
+                        logger.error("❌ Debug: TTS initialization failed")
+                        
+                except Exception as e:
+                    logger.error(f"❌ Debug: Greeting error - {e}")
+            
+            elif event == 'media':
+                # Handle incoming audio from caller
+                stream_sid = data.get('streamSid', 'unknown')
+                audio_payload = data['media']['payload']
+                audio_chunk = base64.b64decode(audio_payload)
+                
+                logger.debug(f"📥 Debug: Received {len(audio_chunk)} bytes of audio from {stream_sid}")
+                
+                # For now, just acknowledge we heard something (every 50 chunks to avoid spam)
+                if not hasattr(websocket, 'audio_chunk_count'):
+                    websocket.audio_chunk_count = 0
+                    websocket.last_response_time = 0
+                
+                websocket.audio_chunk_count += 1
+                
+                # Respond every few seconds when we detect sustained audio
+                current_time = time.time()
+                if (websocket.audio_chunk_count % 100 == 0 and 
+                    current_time - websocket.last_response_time > 3):
+                    
+                    try:
+                        from simple_tts import generate_simple_speech
+                        
+                        response_text = "I can hear you! This is working great. Keep talking and I'll respond in real-time."
+                        wav_data = await generate_simple_speech(response_text)
+                        
+                        if wav_data:
+                            payload = base64.b64encode(wav_data).decode('ascii')
+                            media_message = {
+                                "event": "media",
+                                "streamSid": stream_sid,
+                                "media": {"payload": payload}
+                            }
+                            await websocket.send_text(json.dumps(media_message))
+                            websocket.last_response_time = current_time
+                            logger.info(f"✅ Debug: Sent response after {websocket.audio_chunk_count} chunks")
+                            
+                    except Exception as e:
+                        logger.error(f"❌ Debug: Response generation failed - {e}")
+            
+            elif event == 'closed':
+                logger.info("🔍 Debug: Media stream closed")
+                break
+                
             elif event == 'ping':
                 await websocket.send_text(json.dumps({
                     "event": "pong",
