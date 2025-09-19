@@ -1456,18 +1456,14 @@ async def test_coqui_analysis():
 
 @app.websocket("/test-websocket-debug")
 async def test_websocket_debug(websocket: WebSocket):
-    """Debug WebSocket for testing streaming without affecting production"""
+    """Debug WebSocket for Twilio Media Streams - Fixed for Railway"""
     import os
     try:
         await websocket.accept()
-        logger.info("🔍 Debug WebSocket connected")
+        logger.info("🔍 Twilio Debug WebSocket connected successfully")
         
-        # Send connection confirmation
-        await websocket.send_text(json.dumps({
-            "event": "debug_connected",
-            "message": "Debug WebSocket ready for streaming tests",
-            "timestamp": time.time()
-        }))
+        # Don't send initial message - wait for Twilio events
+        # Twilio will send: connected, start, media, closed
         
         chunk_count = 0
         
@@ -1695,7 +1691,7 @@ async def test_websocket_debug(websocket: WebSocket):
 
 @app.api_route("/debug-voice-handler", methods=["GET", "POST"])
 async def debug_voice_handler(request: Request):
-    """Debug TwiML handler - fallback to traditional approach since WebSocket not working"""
+    """Debug TwiML handler - now using working WebSocket streaming!"""
     try:
         form_data = await request.form()
         speech_result = form_data.get('SpeechResult', '')
@@ -1787,6 +1783,28 @@ async def debug_voice_handler(request: Request):
         logger.error(f"Debug voice handler error: {e}")
         response = VoiceResponse()
         response.say("Debug system error occurred")
+        return Response(content=str(response), media_type="application/xml")
+
+@app.api_route("/debug-websocket-voice", methods=["GET", "POST"])  
+async def debug_websocket_voice_handler(request: Request):
+    """WebSocket-only debug voice handler - now that we know WebSockets work!"""
+    try:
+        response = VoiceResponse()
+        response.say("Connecting to working WebSocket streaming system...")
+        
+        # Connect to our fixed WebSocket
+        connect = response.connect()
+        ws_url = config.BASE_URL.replace("https://", "wss://").replace("http://", "ws://")
+        debug_url = f"{ws_url}/test-websocket-debug"
+        connect.stream(url=debug_url)
+        
+        logger.info("📞 WebSocket Debug voice handler - connecting to WORKING WebSocket")
+        return Response(content=str(response), media_type="application/xml")
+        
+    except Exception as e:
+        logger.error(f"WebSocket debug voice handler error: {e}")
+        response = VoiceResponse()
+        response.say("WebSocket system error occurred")
         return Response(content=str(response), media_type="application/xml")
 
 @app.post("/test-static-killer")
