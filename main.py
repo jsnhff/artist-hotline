@@ -1460,7 +1460,7 @@ async def test_websocket_debug(websocket: WebSocket):
     import os
     try:
         await websocket.accept()
-        logger.info("🔍 Twilio Debug WebSocket connected successfully")
+        logger.error("🚀🚀🚀 TWILIO WEBSOCKET CONNECTED!!! 🚀🚀🚀")
         
         # Don't send initial message - wait for Twilio events
         # Twilio will send: connected, start, media, closed
@@ -1472,7 +1472,7 @@ async def test_websocket_debug(websocket: WebSocket):
             data = json.loads(message)
             
             event = data.get('event', 'unknown')
-            logger.info(f"🔍 Debug WebSocket received: {event}")
+            logger.error(f"🔍🔍🔍 WEBSOCKET EVENT: {event} - Data: {list(data.keys())}")
             
             if event == 'test_sine_wave':
                 # Send back the sine wave we generated earlier
@@ -1572,7 +1572,7 @@ async def test_websocket_debug(websocket: WebSocket):
             elif event == 'start':
                 stream_sid = data['start']['streamSid']
                 call_sid = data['start']['callSid']
-                logger.info(f"🚀 Debug: Media stream started - {stream_sid} for call {call_sid}")
+                logger.error(f"🚀🚀🚀 WEBSOCKET START EVENT - Stream: {stream_sid}, Call: {call_sid}")
                 
                 # Store stream info for later use
                 websocket.stream_sid = stream_sid
@@ -1580,22 +1580,23 @@ async def test_websocket_debug(websocket: WebSocket):
                 websocket.audio_chunk_count = 0
                 websocket.last_response_time = 0
                 
-                # Send initial greeting using Simple TTS
-                greeting_text = "Hello! I can hear you now. Please start talking and I will respond every few seconds."
+                # Send immediate simple test message
+                logger.error("🔊 SENDING IMMEDIATE TEST MESSAGE")
+                test_message = "WebSocket is working! You should hear this message clearly."
                 
                 try:
                     from simple_tts import initialize_simple_tts, generate_simple_speech
                     
                     # Initialize TTS
-                    logger.info("🔧 Debug: Initializing TTS...")
+                    logger.error("🔧 INITIALIZING TTS FOR WEBSOCKET...")
                     tts_ready = await initialize_simple_tts()
                     if tts_ready:
-                        logger.info("✅ Debug: TTS initialized, generating greeting...")
-                        # Generate greeting audio
-                        wav_data = await generate_simple_speech(greeting_text)
+                        logger.error("✅ TTS READY - GENERATING AUDIO...")
+                        # Generate test audio
+                        wav_data = await generate_simple_speech(test_message)
                         if wav_data:
-                            logger.info(f"✅ Debug: Generated {len(wav_data)} bytes of greeting audio")
-                            # For now, send as base64 WAV (Simple TTS fallback)
+                            logger.error(f"✅ GENERATED {len(wav_data)} BYTES - SENDING TO TWILIO...")
+                            # Send as base64 WAV
                             payload = base64.b64encode(wav_data).decode('ascii')
                             
                             # Send as Twilio media event
@@ -1605,16 +1606,16 @@ async def test_websocket_debug(websocket: WebSocket):
                                 "media": {"payload": payload}
                             }
                             await websocket.send_text(json.dumps(media_message))
-                            logger.info("✅ Debug: Sent greeting audio to Twilio")
+                            logger.error("✅✅✅ SENT AUDIO TO TWILIO - YOU SHOULD HEAR THIS!")
                         else:
-                            logger.error("❌ Debug: Failed to generate greeting audio")
+                            logger.error("❌ FAILED TO GENERATE AUDIO")
                     else:
-                        logger.error("❌ Debug: TTS initialization failed")
+                        logger.error("❌ TTS INITIALIZATION FAILED")
                         
                 except Exception as e:
-                    logger.error(f"❌ Debug: Greeting error - {e}")
+                    logger.error(f"❌❌❌ WEBSOCKET ERROR: {e}")
                     import traceback
-                    logger.error(f"Full error: {traceback.format_exc()}")
+                    logger.error(f"FULL TRACEBACK: {traceback.format_exc()}")
             
             elif event == 'media':
                 # Handle incoming audio from caller
