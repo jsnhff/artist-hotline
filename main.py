@@ -1601,24 +1601,98 @@ async def test_websocket_debug(websocket: WebSocket):
 
 @app.api_route("/debug-voice-handler", methods=["GET", "POST"])
 async def debug_voice_handler(request: Request):
-    """Debug TwiML handler that connects to test WebSocket"""
+    """Debug TwiML handler - fallback to traditional approach since WebSocket not working"""
     try:
+        form_data = await request.form()
+        speech_result = form_data.get('SpeechResult', '')
+        from_number = form_data.get('From', 'unknown')
+        call_sid = form_data.get('CallSid', 'unknown')
+        
         response = VoiceResponse()
-        response.say("Connecting to debug streaming test system...")
         
-        # Connect to debug WebSocket instead of production
-        connect = response.connect()
-        ws_url = config.BASE_URL.replace("https://", "wss://").replace("http://", "ws://")
-        debug_url = f"{ws_url}/test-websocket-debug"
-        connect.stream(url=debug_url)
+        if not speech_result:
+            # Initial call - no speech yet
+            greeting_text = "Hello! This is the debug voice system. I can generate crystal clear audio. Please say something and I will respond."
+            
+            # Try to generate with Simple TTS for clear audio
+            try:
+                from simple_tts import initialize_simple_tts, generate_simple_speech
+                
+                tts_ready = await initialize_simple_tts()
+                if tts_ready:
+                    wav_data = await generate_simple_speech(greeting_text)
+                    if wav_data:
+                        # Save audio for serving
+                        import hashlib
+                        text_hash = hashlib.md5(greeting_text.encode()).hexdigest()
+                        audio_cache[text_hash] = wav_data
+                        audio_url = f"{config.BASE_URL}/audio/{text_hash}"
+                        response.play(audio_url)
+                        logger.info("✅ Debug: Generated greeting with Simple TTS")
+                    else:
+                        response.say(greeting_text, voice="Polly.Joanna")
+                else:
+                    response.say(greeting_text, voice="Polly.Joanna")
+                    
+            except Exception as e:
+                logger.error(f"Debug TTS failed: {e}")
+                response.say(greeting_text, voice="Polly.Joanna")
+            
+            # Listen for speech
+            gather = response.gather(
+                input='speech',
+                action='/debug-voice-handler',
+                method='POST',
+                speech_timeout=3,
+                timeout=15,
+                enhanced=True
+            )
+            
+        else:
+            # User said something - respond!
+            logger.info(f"🎤 Debug: User said '{speech_result}'")
+            
+            response_text = f"I heard you say: {speech_result}. That was crystal clear! Say something else and I'll respond again."
+            
+            # Generate response with Simple TTS
+            try:
+                from simple_tts import generate_simple_speech
+                wav_data = await generate_simple_speech(response_text)
+                if wav_data:
+                    import hashlib
+                    text_hash = hashlib.md5(response_text.encode()).hexdigest()
+                    audio_cache[text_hash] = wav_data
+                    audio_url = f"{config.BASE_URL}/audio/{text_hash}"
+                    response.play(audio_url)
+                    logger.info("✅ Debug: Generated response with Simple TTS")
+                else:
+                    response.say(response_text, voice="Polly.Joanna")
+                    
+            except Exception as e:
+                logger.error(f"Debug response TTS failed: {e}")
+                response.say(response_text, voice="Polly.Joanna")
+            
+            # Continue listening
+            gather = response.gather(
+                input='speech',
+                action='/debug-voice-handler',
+                method='POST', 
+                speech_timeout=3,
+                timeout=15,
+                enhanced=True
+            )
         
-        logger.info("📞 Debug voice handler - connecting to test WebSocket")
+        # Timeout fallback
+        response.say("Thanks for testing the debug system! The audio quality should be crystal clear.")
+        response.hangup()
+        
+        logger.info("📞 Debug voice handler - using traditional TwiML approach")
         return Response(content=str(response), media_type="application/xml")
         
     except Exception as e:
         logger.error(f"Debug voice handler error: {e}")
         response = VoiceResponse()
-        response.say("Debug system not available")
+        response.say("Debug system error occurred")
         return Response(content=str(response), media_type="application/xml")
 
 @app.post("/test-static-killer")
