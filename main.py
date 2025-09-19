@@ -1484,18 +1484,27 @@ async def test_websocket_debug(websocket: WebSocket):
                 call_sid = data['start']['callSid']
                 logger.info(f"🚀 Debug: Media stream started - {stream_sid} for call {call_sid}")
                 
+                # Store stream info for later use
+                websocket.stream_sid = stream_sid
+                websocket.call_sid = call_sid
+                websocket.audio_chunk_count = 0
+                websocket.last_response_time = 0
+                
                 # Send initial greeting using Simple TTS
-                greeting_text = "Hello! This is the debug streaming system. I can hear you clearly and respond in real-time. What would you like to talk about?"
+                greeting_text = "Hello! I can hear you now. Please start talking and I will respond every few seconds."
                 
                 try:
                     from simple_tts import initialize_simple_tts, generate_simple_speech
                     
                     # Initialize TTS
+                    logger.info("🔧 Debug: Initializing TTS...")
                     tts_ready = await initialize_simple_tts()
                     if tts_ready:
+                        logger.info("✅ Debug: TTS initialized, generating greeting...")
                         # Generate greeting audio
                         wav_data = await generate_simple_speech(greeting_text)
                         if wav_data:
+                            logger.info(f"✅ Debug: Generated {len(wav_data)} bytes of greeting audio")
                             # For now, send as base64 WAV (Simple TTS fallback)
                             payload = base64.b64encode(wav_data).decode('ascii')
                             
@@ -1506,42 +1515,58 @@ async def test_websocket_debug(websocket: WebSocket):
                                 "media": {"payload": payload}
                             }
                             await websocket.send_text(json.dumps(media_message))
-                            logger.info("✅ Debug: Sent greeting audio")
+                            logger.info("✅ Debug: Sent greeting audio to Twilio")
                         else:
-                            logger.error("❌ Debug: Failed to generate greeting")
+                            logger.error("❌ Debug: Failed to generate greeting audio")
                     else:
                         logger.error("❌ Debug: TTS initialization failed")
                         
                 except Exception as e:
                     logger.error(f"❌ Debug: Greeting error - {e}")
+                    import traceback
+                    logger.error(f"Full error: {traceback.format_exc()}")
             
             elif event == 'media':
                 # Handle incoming audio from caller
-                stream_sid = data.get('streamSid', 'unknown')
+                stream_sid = data.get('streamSid', getattr(websocket, 'stream_sid', 'unknown'))
                 audio_payload = data['media']['payload']
                 audio_chunk = base64.b64decode(audio_payload)
                 
-                logger.debug(f"📥 Debug: Received {len(audio_chunk)} bytes of audio from {stream_sid}")
-                
-                # For now, just acknowledge we heard something (every 50 chunks to avoid spam)
+                # Initialize counters if not present
                 if not hasattr(websocket, 'audio_chunk_count'):
                     websocket.audio_chunk_count = 0
                     websocket.last_response_time = 0
                 
                 websocket.audio_chunk_count += 1
                 
-                # Respond every few seconds when we detect sustained audio
+                # Log every 50 chunks so we know audio is coming in
+                if websocket.audio_chunk_count % 50 == 0:
+                    logger.info(f"📥 Debug: Received {websocket.audio_chunk_count} audio chunks so far")
+                
+                # Respond much more aggressively - every 25 chunks (roughly every 0.5 seconds)
                 current_time = time.time()
-                if (websocket.audio_chunk_count % 100 == 0 and 
-                    current_time - websocket.last_response_time > 3):
+                if (websocket.audio_chunk_count % 25 == 0 and 
+                    current_time - websocket.last_response_time > 2):
+                    
+                    logger.info(f"🎤 Debug: Triggering response after {websocket.audio_chunk_count} chunks")
                     
                     try:
                         from simple_tts import generate_simple_speech
                         
-                        response_text = "I can hear you! This is working great. Keep talking and I'll respond in real-time."
+                        responses = [
+                            "I hear you loud and clear!",
+                            "Yes, I can hear you talking!",
+                            "This is working perfectly!",
+                            "Great audio quality!",
+                            "Keep talking, I'm listening!"
+                        ]
+                        response_text = responses[websocket.audio_chunk_count // 25 % len(responses)]
+                        
+                        logger.info(f"🔊 Debug: Generating response: '{response_text}'")
                         wav_data = await generate_simple_speech(response_text)
                         
                         if wav_data:
+                            logger.info(f"✅ Debug: Generated {len(wav_data)} bytes for response")
                             payload = base64.b64encode(wav_data).decode('ascii')
                             media_message = {
                                 "event": "media",
@@ -1550,10 +1575,14 @@ async def test_websocket_debug(websocket: WebSocket):
                             }
                             await websocket.send_text(json.dumps(media_message))
                             websocket.last_response_time = current_time
-                            logger.info(f"✅ Debug: Sent response after {websocket.audio_chunk_count} chunks")
+                            logger.info(f"✅ Debug: Sent response '{response_text}' after {websocket.audio_chunk_count} chunks")
+                        else:
+                            logger.error("❌ Debug: Failed to generate response audio")
                             
                     except Exception as e:
                         logger.error(f"❌ Debug: Response generation failed - {e}")
+                        import traceback
+                        logger.error(f"Full response error: {traceback.format_exc()}")
             
             elif event == 'closed':
                 logger.info("🔍 Debug: Media stream closed")
