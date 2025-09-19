@@ -1105,9 +1105,409 @@ async def handle_coqui_stream(websocket: WebSocket):
             logger.info(f"Coqui stream cleanup completed for {stream_sid}")
 
 
-# ===== STATIC KILLER TEST SYSTEM =====
-# Non-destructive testing system for eliminating audio static
+# ===== STREAMING DEBUG TEST SYSTEM =====
+# Non-destructive testing system for debugging streaming audio
 # Runs alongside production system without affecting it
+
+@app.get("/test-streaming-status")
+async def test_streaming_status():
+    """Check if streaming test dependencies are available"""
+    try:
+        from simple_tts import generate_simple_speech
+        simple_tts_available = True
+    except ImportError:
+        simple_tts_available = False
+    
+    import subprocess
+    try:
+        subprocess.run(['ffmpeg', '-version'], capture_output=True, check=True)
+        ffmpeg_available = True
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        ffmpeg_available = False
+    
+    return {
+        "status": "ready" if simple_tts_available and ffmpeg_available else "missing_deps",
+        "simple_tts": simple_tts_available,
+        "ffmpeg": ffmpeg_available,
+        "test_endpoints": [
+            "/test-streaming-status",
+            "/test-audio-conversion",
+            "/test-sine-wave", 
+            "/test-coqui-analysis",
+            "/test-websocket-debug",
+            "/debug-voice-handler"
+        ]
+    }
+
+@app.post("/test-audio-conversion")
+async def test_audio_conversion():
+    """Test 1: Coqui → WAV → Mulaw conversion pipeline"""
+    try:
+        from simple_tts import initialize_simple_tts, generate_simple_speech
+        import subprocess
+        import os
+        
+        test_text = "Testing streaming voice Jason - this should be crystal clear"
+        logger.info(f"🧪 Test 1: Converting text '{test_text}'")
+        
+        # Initialize TTS first
+        tts_ready = await initialize_simple_tts()
+        if not tts_ready:
+            return {"error": "Failed to initialize Simple TTS"}
+        
+        # 1. Generate with Simple TTS
+        wav_data = await generate_simple_speech(test_text)
+        if not wav_data:
+            return {"error": "Simple TTS failed to generate audio"}
+        
+        # Save WAV
+        wav_path = "/tmp/streaming_test_coqui.wav"
+        with open(wav_path, 'wb') as f:
+            f.write(wav_data)
+        
+        # 2. Try to convert to Twilio mulaw format (skip if FFmpeg not available)
+        mulaw_path = "/tmp/streaming_test.ulaw"
+        mulaw_size = 0
+        format_info = "ffmpeg_not_available"
+        
+        # Check if ffmpeg exists
+        ffmpeg_available = False
+        for ffmpeg_path in ['/usr/local/bin/ffmpeg', '/opt/homebrew/bin/ffmpeg', 'ffmpeg']:
+            try:
+                result = subprocess.run([ffmpeg_path, '-version'], capture_output=True, timeout=2)
+                if result.returncode == 0:
+                    ffmpeg_available = True
+                    # Try conversion
+                    result = subprocess.run([
+                        ffmpeg_path, '-y', '-i', wav_path,
+                        '-ar', '8000', '-ac', '1', '-f', 'mulaw', mulaw_path
+                    ], capture_output=True, text=True)
+                    
+                    if result.returncode == 0:
+                        mulaw_size = os.path.getsize(mulaw_path)
+                        # Probe final format
+                        probe_result = subprocess.run([
+                            'ffprobe', '-v', 'quiet', '-show_entries', 
+                            'stream=codec_name,sample_rate,channels',
+                            '-of', 'csv=p=0', mulaw_path
+                        ], capture_output=True, text=True)
+                        format_info = probe_result.stdout.strip() if probe_result.returncode == 0 else "unknown"
+                    else:
+                        format_info = f"conversion_failed: {result.stderr}"
+                    break
+            except:
+                continue
+        
+        # 3. Analyze results
+        wav_size = len(wav_data)
+        
+        result = {
+            "status": "success",
+            "test": "audio_conversion",
+            "input_wav_bytes": wav_size,
+            "output_mulaw_bytes": mulaw_size,
+            "final_format": format_info,
+            "ffmpeg_available": ffmpeg_available,
+            "files": {
+                "wav": wav_path
+            },
+            "test_commands": {
+                "play_wav": f"afplay {wav_path}"
+            }
+        }
+        
+        if ffmpeg_available and mulaw_size > 0:
+            result["compression_ratio"] = f"{mulaw_size/wav_size:.2f}" if wav_size > 0 else "N/A"
+            result["files"]["mulaw"] = mulaw_path
+            result["test_commands"]["play_mulaw"] = f"ffplay -f mulaw -ar 8000 -ac 1 {mulaw_path}"
+        else:
+            result["compression_ratio"] = "N/A (no conversion)"
+            result["note"] = "Install ffmpeg to test mulaw conversion: brew install ffmpeg"
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Audio conversion test failed: {e}")
+        return {"error": str(e)}
+
+@app.post("/test-sine-wave")
+async def test_sine_wave():
+    """Test 3: Generate known-good mulaw audio for WebSocket testing"""
+    try:
+        import subprocess
+        import base64
+        import os
+        
+        # Generate sine wave directly in mulaw format
+        sine_path = "/tmp/test_sine.ulaw"
+        result = subprocess.run([
+            'ffmpeg', '-y',
+            '-f', 'lavfi', 
+            '-i', 'sine=frequency=440:duration=2:sample_rate=8000',
+            '-f', 'mulaw', sine_path
+        ], capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            return {"error": f"Sine wave generation failed: {result.stderr}"}
+        
+        # Read and encode for WebSocket
+        with open(sine_path, 'rb') as f:
+            mulaw_data = f.read()
+        
+        payload = base64.b64encode(mulaw_data).decode('ascii')
+        file_size = len(mulaw_data)
+        
+        return {
+            "status": "success", 
+            "test": "sine_wave",
+            "mulaw_bytes": file_size,
+            "base64_chars": len(payload),
+            "file": sine_path,
+            "payload_preview": payload[:100] + "...",
+            "test_commands": {
+                "play": f"ffplay -f mulaw -ar 8000 -ac 1 {sine_path}",
+                "analyze": f"ffprobe -v quiet -show_streams {sine_path}"
+            },
+            "websocket_payload": {
+                "event": "media",
+                "streamSid": "TEST_STREAM_ID",
+                "media": {"payload": payload}
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Sine wave test failed: {e}")
+        return {"error": str(e)}
+
+@app.post("/test-coqui-analysis") 
+async def test_coqui_analysis():
+    """Test 4: Analyze Simple TTS output format in detail"""
+    try:
+        from simple_tts import initialize_simple_tts, generate_simple_speech
+        import subprocess
+        import time
+        
+        # Initialize TTS first
+        tts_ready = await initialize_simple_tts()
+        if not tts_ready:
+            return {"error": "Failed to initialize Simple TTS"}
+        
+        test_phrases = [
+            "Hello",
+            "This is a medium length test",
+            "This is a much longer test phrase to analyze how Coqui handles extended speech generation"
+        ]
+        
+        results = []
+        
+        for i, phrase in enumerate(test_phrases):
+            start_time = time.time()
+            
+            # Generate audio
+            wav_data = await generate_simple_speech(phrase)
+            generation_time = time.time() - start_time
+            
+            if not wav_data:
+                results.append({"phrase": phrase, "error": "Generation failed"})
+                continue
+            
+            # Save and analyze
+            wav_path = f"/tmp/coqui_analysis_{i}.wav"
+            with open(wav_path, 'wb') as f:
+                f.write(wav_data)
+            
+            # Detailed analysis with ffprobe
+            probe_result = subprocess.run([
+                'ffprobe', '-v', 'quiet', '-print_format', 'json',
+                '-show_streams', '-show_format', wav_path
+            ], capture_output=True, text=True)
+            
+            analysis = {
+                "phrase": phrase,
+                "phrase_length": len(phrase),
+                "generation_time": f"{generation_time:.3f}s",
+                "wav_bytes": len(wav_data),
+                "bytes_per_second": int(len(wav_data) / generation_time) if generation_time > 0 else 0,
+                "file": wav_path
+            }
+            
+            if probe_result.returncode == 0:
+                import json
+                probe_data = json.loads(probe_result.stdout)
+                if 'streams' in probe_data and probe_data['streams']:
+                    stream = probe_data['streams'][0]
+                    analysis.update({
+                        "sample_rate": stream.get('sample_rate', 'unknown'),
+                        "channels": stream.get('channels', 'unknown'),
+                        "codec": stream.get('codec_name', 'unknown'),
+                        "bit_rate": stream.get('bit_rate', 'unknown'),
+                        "duration": stream.get('duration', 'unknown')
+                    })
+            
+            results.append(analysis)
+        
+        return {
+            "status": "success",
+            "test": "coqui_analysis", 
+            "results": results,
+            "summary": {
+                "avg_generation_time": f"{sum(float(r['generation_time'][:-1]) for r in results if 'generation_time' in r) / len(results):.3f}s",
+                "total_audio_bytes": sum(r.get('wav_bytes', 0) for r in results)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Coqui analysis test failed: {e}")
+        return {"error": str(e)}
+
+@app.websocket("/test-websocket-debug")
+async def test_websocket_debug(websocket: WebSocket):
+    """Debug WebSocket for testing streaming without affecting production"""
+    import os
+    try:
+        await websocket.accept()
+        logger.info("🔍 Debug WebSocket connected")
+        
+        # Send connection confirmation
+        await websocket.send_text(json.dumps({
+            "event": "debug_connected",
+            "message": "Debug WebSocket ready for streaming tests",
+            "timestamp": time.time()
+        }))
+        
+        chunk_count = 0
+        
+        while True:
+            message = await websocket.receive_text()
+            data = json.loads(message)
+            
+            event = data.get('event', 'unknown')
+            logger.info(f"🔍 Debug WebSocket received: {event}")
+            
+            if event == 'test_sine_wave':
+                # Send back the sine wave we generated earlier
+                try:
+                    sine_path = "/tmp/test_sine.ulaw"
+                    if os.path.exists(sine_path):
+                        with open(sine_path, 'rb') as f:
+                            mulaw_data = f.read()
+                        
+                        # Send in chunks like Twilio would
+                        chunk_size = 160  # 20ms of audio at 8kHz
+                        chunks = [mulaw_data[i:i+chunk_size] for i in range(0, len(mulaw_data), chunk_size)]
+                        
+                        for chunk in chunks:
+                            payload = base64.b64encode(chunk).decode('ascii')
+                            response = {
+                                "event": "debug_audio_chunk",
+                                "chunk_number": chunk_count,
+                                "payload_size": len(payload),
+                                "audio_bytes": len(chunk),
+                                "payload": payload
+                            }
+                            await websocket.send_text(json.dumps(response))
+                            chunk_count += 1
+                            await asyncio.sleep(0.02)  # 20ms delay
+                        
+                        await websocket.send_text(json.dumps({
+                            "event": "debug_audio_complete",
+                            "total_chunks": chunk_count,
+                            "total_bytes": len(mulaw_data)
+                        }))
+                    else:
+                        await websocket.send_text(json.dumps({
+                            "event": "debug_error",
+                            "message": "No sine wave file found - run /test-sine-wave first"
+                        }))
+                        
+                except Exception as e:
+                    await websocket.send_text(json.dumps({
+                        "event": "debug_error", 
+                        "message": f"Failed to send sine wave: {e}"
+                    }))
+            
+            elif event == 'test_coqui_audio':
+                # Test with Coqui generated audio
+                text = data.get('text', 'Debug test message')
+                try:
+                    from simple_tts import generate_simple_speech
+                    import subprocess
+                    
+                    # Generate and convert
+                    wav_data = await generate_simple_speech(text)
+                    if wav_data:
+                        wav_path = "/tmp/debug_coqui.wav"
+                        mulaw_path = "/tmp/debug_coqui.ulaw"
+                        
+                        with open(wav_path, 'wb') as f:
+                            f.write(wav_data)
+                        
+                        result = subprocess.run([
+                            'ffmpeg', '-y', '-i', wav_path,
+                            '-ar', '8000', '-ac', '1', '-f', 'mulaw', mulaw_path
+                        ], capture_output=True)
+                        
+                        if result.returncode == 0:
+                            with open(mulaw_path, 'rb') as f:
+                                mulaw_data = f.read()
+                            
+                            payload = base64.b64encode(mulaw_data).decode('ascii')
+                            await websocket.send_text(json.dumps({
+                                "event": "debug_coqui_audio",
+                                "text": text,
+                                "wav_bytes": len(wav_data),
+                                "mulaw_bytes": len(mulaw_data),
+                                "payload": payload
+                            }))
+                        else:
+                            await websocket.send_text(json.dumps({
+                                "event": "debug_error",
+                                "message": f"Conversion failed: {result.stderr.decode()}"
+                            }))
+                    else:
+                        await websocket.send_text(json.dumps({
+                            "event": "debug_error",
+                            "message": "Coqui generation failed"
+                        }))
+                        
+                except Exception as e:
+                    await websocket.send_text(json.dumps({
+                        "event": "debug_error",
+                        "message": f"Coqui test failed: {e}"
+                    }))
+            
+            elif event == 'ping':
+                await websocket.send_text(json.dumps({
+                    "event": "pong",
+                    "timestamp": time.time()
+                }))
+            
+    except WebSocketDisconnect:
+        logger.info("🔍 Debug WebSocket disconnected")
+    except Exception as e:
+        logger.error(f"Debug WebSocket error: {e}")
+
+@app.api_route("/debug-voice-handler", methods=["GET", "POST"])
+async def debug_voice_handler(request: Request):
+    """Debug TwiML handler that connects to test WebSocket"""
+    try:
+        response = VoiceResponse()
+        response.say("Connecting to debug streaming test system...")
+        
+        # Connect to debug WebSocket instead of production
+        connect = response.connect()
+        ws_url = config.BASE_URL.replace("https://", "wss://").replace("http://", "ws://")
+        debug_url = f"{ws_url}/test-websocket-debug"
+        connect.stream(url=debug_url)
+        
+        logger.info("📞 Debug voice handler - connecting to test WebSocket")
+        return Response(content=str(response), media_type="application/xml")
+        
+    except Exception as e:
+        logger.error(f"Debug voice handler error: {e}")
+        response = VoiceResponse()
+        response.say("Debug system not available")
+        return Response(content=str(response), media_type="application/xml")
 
 @app.post("/test-static-killer")
 async def test_static_killer_endpoint(request: Request):
