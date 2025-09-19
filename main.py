@@ -1630,16 +1630,16 @@ async def test_websocket_debug(websocket: WebSocket):
                 
                 websocket.audio_chunk_count += 1
                 
-                # Log every 50 chunks so we know audio is coming in
-                if websocket.audio_chunk_count % 50 == 0:
-                    logger.info(f"📥 Debug: Received {websocket.audio_chunk_count} audio chunks so far")
+                # Log every 10 chunks so we know audio is coming in
+                if websocket.audio_chunk_count % 10 == 0:
+                    logger.error(f"📥📥📥 RECEIVED {websocket.audio_chunk_count} AUDIO CHUNKS - {len(audio_chunk)} bytes")
                 
-                # Respond much more aggressively - every 25 chunks (roughly every 0.5 seconds)
+                # Respond VERY aggressively - every 10 chunks (roughly every 0.2 seconds)
                 current_time = time.time()
-                if (websocket.audio_chunk_count % 25 == 0 and 
-                    current_time - websocket.last_response_time > 2):
+                if (websocket.audio_chunk_count % 10 == 0 and 
+                    current_time - websocket.last_response_time > 1):
                     
-                    logger.info(f"🎤 Debug: Triggering response after {websocket.audio_chunk_count} chunks")
+                    logger.error(f"🎤🎤🎤 TRIGGERING RESPONSE AFTER {websocket.audio_chunk_count} CHUNKS")
                     
                     try:
                         from simple_tts import generate_simple_speech
@@ -1651,9 +1651,9 @@ async def test_websocket_debug(websocket: WebSocket):
                             "Great audio quality!",
                             "Keep talking, I'm listening!"
                         ]
-                        response_text = responses[websocket.audio_chunk_count // 25 % len(responses)]
+                        response_text = responses[websocket.audio_chunk_count // 10 % len(responses)]
                         
-                        logger.info(f"🔊 Debug: Generating response: '{response_text}'")
+                        logger.error(f"🔊🔊🔊 GENERATING RESPONSE: '{response_text}'")
                         wav_data = await generate_simple_speech(response_text)
                         
                         if wav_data:
