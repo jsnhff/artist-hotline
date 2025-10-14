@@ -521,18 +521,39 @@ class AudioBuffer:
     def clear(self):
         self.chunks = []
 
+def convert_wav_to_mulaw(wav_data: bytes) -> bytes:
+    """
+    Convert WAV audio to raw µ-law format for Twilio WebSocket.
+
+    Uses wave module to properly parse headers (handles any header size).
+    """
+    import audioop
+    import wave
+    import io
+
+    # Use wave module to properly parse WAV (handles 44, 78, or any byte headers)
+    wav_buffer = io.BytesIO(wav_data)
+    with wave.open(wav_buffer, 'rb') as wav_file:
+        # Extract pure PCM data (no matter what header size)
+        pcm_data = wav_file.readframes(wav_file.getnframes())
+
+    # Convert 16-bit linear PCM to µ-law (8-bit)
+    mulaw_data = audioop.lin2ulaw(pcm_data, 2)
+
+    return mulaw_data
+
 async def transcribe_audio_buffer(audio_data: bytes) -> str:
     """Enhanced transcription with audio buffer handling"""
     # TODO: Integrate with Deepgram WebSocket API for real-time transcription
     # For now, simulate transcription by detecting audio presence
-    
+
     if len(audio_data) > 1000:  # If we have substantial audio data
         # Placeholder - in real implementation, this would:
         # 1. Convert μ-law to linear PCM
         # 2. Send to Deepgram WebSocket
         # 3. Return real-time transcription results
         return "[User spoke - real-time transcription would go here]"
-    
+
     return ""
 
 # Store audio buffers per stream
@@ -1596,10 +1617,11 @@ async def test_websocket_debug(websocket: WebSocket):
                         wav_data = await generate_simple_speech(test_message)
                         if wav_data:
                             logger.error(f"✅ GENERATED {len(wav_data)} BYTES - CONVERTING TO µ-LAW...")
-                            # Convert to µ-law for Twilio WebSocket
-                            from audio_utils import convert_wav_for_twilio
-                            payload = convert_wav_for_twilio(wav_data)
-                            
+                            # Convert to µ-law for Twilio WebSocket using audioop
+                            mulaw_data = convert_wav_to_mulaw(wav_data)
+                            payload = base64.b64encode(mulaw_data).decode('ascii')
+                            logger.error(f"✅ CONVERTED TO {len(mulaw_data)} µ-LAW BYTES")
+
                             # Send as Twilio media event
                             media_message = {
                                 "event": "media",
@@ -1659,9 +1681,10 @@ async def test_websocket_debug(websocket: WebSocket):
                         
                         if wav_data:
                             logger.info(f"✅ Debug: Generated {len(wav_data)} bytes for response")
-                            # Convert to µ-law for Twilio WebSocket
-                            from audio_utils import convert_wav_for_twilio
-                            payload = convert_wav_for_twilio(wav_data)
+                            # Convert to µ-law for Twilio WebSocket using audioop
+                            mulaw_data = convert_wav_to_mulaw(wav_data)
+                            payload = base64.b64encode(mulaw_data).decode('ascii')
+                            logger.info(f"✅ Converted to {len(mulaw_data)} µ-law bytes")
                             media_message = {
                                 "event": "media",
                                 "streamSid": stream_sid,
