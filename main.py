@@ -48,7 +48,8 @@ class Config:
     YOUR_PHONE_NUMBER: str = os.getenv("YOUR_PHONE_NUMBER", "")
     
     # App Configuration
-    BASE_URL: str = os.getenv("BASE_URL", "https://artist-hotline-production.up.railway.app")
+    RAILWAY_PUBLIC_DOMAIN: str = os.getenv("RAILWAY_PUBLIC_DOMAIN", "")
+    BASE_URL: str = os.getenv("BASE_URL", f"https://{RAILWAY_PUBLIC_DOMAIN}" if RAILWAY_PUBLIC_DOMAIN else "https://artist-hotline-production.up.railway.app")
     PORT: int = int(os.getenv("PORT", "8000"))
     
     # Feature Flags
