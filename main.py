@@ -1680,11 +1680,13 @@ async def test_websocket_debug(websocket: WebSocket):
                         logger.error(f"🔊🔊🔊 GENERATING RESPONSE: '{response_text}'")
 
                         # Initialize TTS if needed
+                        logger.error("🚀🚀🚀 NEW CODE IS RUNNING - TTS INIT CHECK!")
                         from simple_tts import initialize_simple_tts
                         if not hasattr(websocket, 'tts_initialized'):
                             logger.error("🔧 Initializing TTS for responses...")
                             await initialize_simple_tts()
                             websocket.tts_initialized = True
+                            logger.error("✅ TTS INITIALIZED SUCCESSFULLY!")
 
                         wav_data = await generate_simple_speech(response_text)
                         
