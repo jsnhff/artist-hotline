@@ -1655,14 +1655,14 @@ async def test_websocket_debug(websocket: WebSocket):
                 websocket.last_response_time = 0
 
                 # Send greeting using ElevenLabs streaming with proper audio conversion
-                logger.error("🔊 SENDING GREETING VIA ELEVENLABS STREAMING")
-                test_message = "WebSocket is working! You should hear this message clearly with proper audio conversion."
+                logger.info("🔊 Sending greeting via ElevenLabs streaming")
+                greeting_message = "Hey! This is Synthetic Jason... I'm basically Jason Huff but weirder and more obsessed with art. What wild idea should we dream up together?"
 
                 try:
                     # Use the production-ready stream_speech_to_twilio function
                     # This handles ElevenLabs WebSocket + MP3 to µ-law conversion
-                    await stream_speech_to_twilio(test_message, websocket, stream_sid)
-                    logger.error("✅✅✅ SENT AUDIO TO TWILIO VIA ELEVENLABS - YOU SHOULD HEAR THIS!")
+                    await stream_speech_to_twilio(greeting_message, websocket, stream_sid)
+                    logger.info("✅ Sent greeting to caller via ElevenLabs streaming")
 
                 except Exception as e:
                     logger.error(f"❌❌❌ ELEVENLABS STREAMING ERROR: {e}")
