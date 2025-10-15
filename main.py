@@ -399,21 +399,25 @@ async def generate_speech(text: str) -> str:
         return await generate_speech_with_elevenlabs(text)
 
 async def stream_speech_to_twilio(text: str, twilio_websocket: WebSocket, stream_sid: str):
-    """Stream TTS audio directly to Twilio WebSocket in real-time"""
+    """Stream TTS audio directly to Twilio WebSocket with proper MP3 to µ-law conversion"""
     try:
         if not text.strip():
             logger.warning("Empty text provided to stream_speech_to_twilio")
             return
-            
+
         logger.info(f"Starting ElevenLabs streaming for: '{text[:50]}...'")
-        
+
+        # Import audio conversion dependencies
+        from pydub import AudioSegment
+        import io
+
         # WebSocket streaming connection to ElevenLabs
         uri = f"wss://api.elevenlabs.io/v1/text-to-speech/{config.ELEVEN_LABS_VOICE_ID}/stream-input"
         logger.debug(f"Connecting to ElevenLabs: {uri}")
-        
+
         async with websockets.connect(uri) as elevenlabs_ws:
             # Send initial message with auth and voice settings
-            # Try to request μ-law format compatible with Twilio (8kHz)
+            # Request MP3 output format (ElevenLabs default)
             init_message = {
                 "text": " ",  # Small initial text
                 "voice_settings": {
@@ -429,77 +433,99 @@ async def stream_speech_to_twilio(text: str, twilio_websocket: WebSocket, stream
             }
             logger.debug("Sending ElevenLabs init message")
             await elevenlabs_ws.send(json.dumps(init_message))
-            
+
             # Send the actual text
             logger.debug(f"Sending text to ElevenLabs: {text}")
             await elevenlabs_ws.send(json.dumps({"text": text}))
-            
+
             # Send EOS (end of stream)
             logger.debug("Sending EOS to ElevenLabs")
             await elevenlabs_ws.send(json.dumps({"text": ""}))
-            
-            # Stream audio chunks directly to Twilio
+
+            # Stream audio chunks with proper conversion
             chunk_count = 0
-            total_audio_bytes = 0
-            
+            total_mp3_bytes = 0
+            total_mulaw_bytes = 0
+
             async for message in elevenlabs_ws:
                 try:
                     data = json.loads(message)
                     logger.debug(f"ElevenLabs response: {list(data.keys())}")
-                    
+
                     # Check for errors first
                     if data.get("error"):
                         logger.error(f"ElevenLabs error: {data['error']}")
                         break
-                    
+
                     if data.get("audio"):
                         chunk_count += 1
                         audio_b64 = data["audio"]
-                        
-                        # Decode to check actual audio size
+
                         try:
-                            audio_bytes = base64.b64decode(audio_b64)
-                            total_audio_bytes += len(audio_bytes)
-                            logger.debug(f"Audio chunk {chunk_count}: {len(audio_bytes)} bytes decoded from {len(audio_b64)} base64 chars")
-                            
-                            # TEMPORARY: For now, try sending raw audio and see what happens
-                            # TODO: Convert from ElevenLabs format to μ-law 8kHz
-                            logger.warning(f"🚨 Sending ElevenLabs audio directly (may cause static due to format mismatch)")
-                            
-                        except Exception as decode_error:
-                            logger.error(f"Failed to decode audio chunk: {decode_error}")
+                            # Step 1: Decode base64 to get MP3 bytes
+                            mp3_bytes = base64.b64decode(audio_b64)
+                            total_mp3_bytes += len(mp3_bytes)
+                            logger.debug(f"Chunk {chunk_count}: Decoded {len(mp3_bytes)} MP3 bytes")
+
+                            # Step 2: Decode MP3 to PCM audio using pydub
+                            audio_segment = AudioSegment.from_mp3(io.BytesIO(mp3_bytes))
+
+                            # Step 3: Resample to 8kHz mono (Twilio requirement)
+                            audio_segment = audio_segment.set_frame_rate(8000).set_channels(1)
+
+                            # Step 4: Export as WAV
+                            wav_buffer = io.BytesIO()
+                            audio_segment.export(wav_buffer, format="wav")
+                            wav_bytes = wav_buffer.getvalue()
+                            logger.debug(f"Chunk {chunk_count}: Converted to {len(wav_bytes)} WAV bytes")
+
+                            # Step 5: Convert WAV to µ-law using existing function
+                            mulaw_bytes = convert_wav_to_mulaw(wav_bytes)
+                            total_mulaw_bytes += len(mulaw_bytes)
+
+                            # Step 6: Encode as base64 for Twilio
+                            mulaw_b64 = base64.b64encode(mulaw_bytes).decode('ascii')
+                            logger.debug(f"Chunk {chunk_count}: Converted to {len(mulaw_bytes)} µ-law bytes")
+
+                        except Exception as conversion_error:
+                            logger.error(f"Failed to convert audio chunk {chunk_count}: {conversion_error}")
                             continue
-                        
-                        # Send to Twilio (with format warning)
+
+                        # Step 7: Send properly formatted audio to Twilio
                         media_message = {
                             "event": "media",
                             "streamSid": stream_sid,
                             "media": {
-                                "payload": audio_b64  # Raw ElevenLabs audio - needs conversion
+                                "payload": mulaw_b64  # Proper µ-law format for Twilio
                             }
                         }
-                        
+
                         try:
                             # Check if WebSocket is still connected before sending
                             if twilio_websocket.client_state.name == "CONNECTED":
                                 await twilio_websocket.send_text(json.dumps(media_message))
-                                logger.debug(f"✅ Sent audio chunk {chunk_count} to Twilio")
+                                logger.debug(f"✅ Sent converted audio chunk {chunk_count} to Twilio")
                             else:
                                 logger.error(f"Twilio WebSocket not connected (state: {twilio_websocket.client_state.name})")
                                 break
                         except Exception as send_error:
                             logger.error(f"Failed to send audio to Twilio: {send_error}")
                             break  # Stop trying to send if connection is broken
-                    
+
                     if data.get("isFinal"):
-                        logger.info(f"✅ Finished streaming: {chunk_count} chunks, {total_audio_bytes} total bytes for '{text[:30]}...'")
+                        logger.info(f"✅ Finished streaming: {chunk_count} chunks")
+                        logger.info(f"   MP3 input: {total_mp3_bytes} bytes")
+                        logger.info(f"   µ-law output: {total_mulaw_bytes} bytes")
+                        logger.info(f"   Text: '{text[:50]}...'")
                         break
-                        
+
                 except json.JSONDecodeError as json_error:
                     logger.error(f"Invalid JSON from ElevenLabs: {json_error}")
                 except Exception as chunk_error:
                     logger.error(f"Error processing ElevenLabs chunk: {chunk_error}")
-                    
+                    import traceback
+                    logger.error(f"Chunk error traceback: {traceback.format_exc()}")
+
     except websockets.exceptions.WebSocketException as ws_error:
         logger.error(f"ElevenLabs WebSocket error: {ws_error}")
     except Exception as e:
@@ -1616,47 +1642,25 @@ async def test_websocket_debug(websocket: WebSocket):
                 stream_sid = data['start']['streamSid']
                 call_sid = data['start']['callSid']
                 logger.error(f"🚀🚀🚀 WEBSOCKET START EVENT - Stream: {stream_sid}, Call: {call_sid}")
-                
+
                 # Store stream info for later use
                 websocket.stream_sid = stream_sid
                 websocket.call_sid = call_sid
                 websocket.audio_chunk_count = 0
                 websocket.last_response_time = 0
-                
-                # Send immediate simple test message
-                logger.error("🔊 SENDING IMMEDIATE TEST MESSAGE")
-                test_message = "WebSocket is working! You should hear this message clearly."
+
+                # Send greeting using ElevenLabs streaming with proper audio conversion
+                logger.error("🔊 SENDING GREETING VIA ELEVENLABS STREAMING")
+                test_message = "WebSocket is working! You should hear this message clearly with proper audio conversion."
 
                 try:
-                    # Ensure TTS is initialized globally
-                    logger.error("🔧 ENSURING GLOBAL TTS IS READY...")
-                    if not await ensure_tts_initialized():
-                        logger.error("❌ GLOBAL TTS INIT FAILED - CANNOT SEND GREETING")
-                    else:
-                        from simple_tts import generate_simple_speech
-                        logger.error("✅ TTS READY - GENERATING AUDIO...")
-                        # Generate test audio
-                        wav_data = await generate_simple_speech(test_message)
-                        if wav_data:
-                            logger.error(f"✅ GENERATED {len(wav_data)} BYTES - CONVERTING TO µ-LAW...")
-                            # Convert to µ-law for Twilio WebSocket using audioop
-                            mulaw_data = convert_wav_to_mulaw(wav_data)
-                            payload = base64.b64encode(mulaw_data).decode('ascii')
-                            logger.error(f"✅ CONVERTED TO {len(mulaw_data)} µ-LAW BYTES")
-
-                            # Send as Twilio media event
-                            media_message = {
-                                "event": "media",
-                                "streamSid": stream_sid,
-                                "media": {"payload": payload}
-                            }
-                            await websocket.send_text(json.dumps(media_message))
-                            logger.error("✅✅✅ SENT AUDIO TO TWILIO - YOU SHOULD HEAR THIS!")
-                        else:
-                            logger.error("❌ FAILED TO GENERATE AUDIO")
+                    # Use the production-ready stream_speech_to_twilio function
+                    # This handles ElevenLabs WebSocket + MP3 to µ-law conversion
+                    await stream_speech_to_twilio(test_message, websocket, stream_sid)
+                    logger.error("✅✅✅ SENT AUDIO TO TWILIO VIA ELEVENLABS - YOU SHOULD HEAR THIS!")
 
                 except Exception as e:
-                    logger.error(f"❌❌❌ WEBSOCKET ERROR: {e}")
+                    logger.error(f"❌❌❌ ELEVENLABS STREAMING ERROR: {e}")
                     import traceback
                     logger.error(f"FULL TRACEBACK: {traceback.format_exc()}")
             
@@ -1677,16 +1681,14 @@ async def test_websocket_debug(websocket: WebSocket):
                 if websocket.audio_chunk_count % 10 == 0:
                     logger.error(f"📥📥📥 RECEIVED {websocket.audio_chunk_count} AUDIO CHUNKS - {len(audio_chunk)} bytes")
                 
-                # Respond VERY aggressively - every 10 chunks (roughly every 0.2 seconds)
+                # Respond after receiving substantial audio - every 10 chunks (roughly every 0.2 seconds)
                 current_time = time.time()
-                if (websocket.audio_chunk_count % 10 == 0 and 
+                if (websocket.audio_chunk_count % 10 == 0 and
                     current_time - websocket.last_response_time > 1):
-                    
+
                     logger.error(f"🎤🎤🎤 TRIGGERING RESPONSE AFTER {websocket.audio_chunk_count} CHUNKS")
-                    
+
                     try:
-                        from simple_tts import generate_simple_speech
-                        
                         responses = [
                             "I hear you loud and clear!",
                             "Yes, I can hear you talking!",
@@ -1698,33 +1700,11 @@ async def test_websocket_debug(websocket: WebSocket):
 
                         logger.error(f"🔊🔊🔊 GENERATING RESPONSE: '{response_text}'")
 
-                        # Ensure TTS is initialized globally
-                        logger.error("🚀🚀🚀 CHECKING GLOBAL TTS INITIALIZATION...")
-                        if not await ensure_tts_initialized():
-                            logger.error("❌ TTS NOT INITIALIZED - CANNOT GENERATE AUDIO")
-                            continue
-                        logger.error("✅ TTS IS READY - GENERATING AUDIO...")
+                        # Use ElevenLabs streaming with proper audio conversion
+                        await stream_speech_to_twilio(response_text, websocket, stream_sid)
+                        websocket.last_response_time = current_time
+                        logger.error(f"✅ Debug: Sent response '{response_text}' after {websocket.audio_chunk_count} chunks")
 
-                        from simple_tts import generate_simple_speech
-                        wav_data = await generate_simple_speech(response_text)
-                        
-                        if wav_data:
-                            logger.info(f"✅ Debug: Generated {len(wav_data)} bytes for response")
-                            # Convert to µ-law for Twilio WebSocket using audioop
-                            mulaw_data = convert_wav_to_mulaw(wav_data)
-                            payload = base64.b64encode(mulaw_data).decode('ascii')
-                            logger.info(f"✅ Converted to {len(mulaw_data)} µ-law bytes")
-                            media_message = {
-                                "event": "media",
-                                "streamSid": stream_sid,
-                                "media": {"payload": payload}
-                            }
-                            await websocket.send_text(json.dumps(media_message))
-                            websocket.last_response_time = current_time
-                            logger.info(f"✅ Debug: Sent response '{response_text}' after {websocket.audio_chunk_count} chunks")
-                        else:
-                            logger.error("❌ Debug: Failed to generate response audio")
-                            
                     except Exception as e:
                         logger.error(f"❌ Debug: Response generation failed - {e}")
                         import traceback

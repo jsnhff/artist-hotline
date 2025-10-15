@@ -9,6 +9,9 @@ websockets
 openai
 numpy>=1.24.0
 
+# Audio processing for WebSocket streaming (MP3 to µ-law conversion)
+pydub>=0.25.1
+
 # Optional dependencies for development/testing
 # Simple TTS fallback
 pyttsx3>=2.90
