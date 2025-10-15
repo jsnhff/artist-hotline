@@ -89,6 +89,27 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+# Initialize Simple TTS globally at startup
+import asyncio
+_tts_initialized = False
+
+async def ensure_tts_initialized():
+    """Ensure Simple TTS is initialized globally"""
+    global _tts_initialized
+    if not _tts_initialized:
+        try:
+            from simple_tts import initialize_simple_tts
+            logger.error("🔧 GLOBAL TTS INITIALIZATION STARTING...")
+            success = await initialize_simple_tts()
+            if success:
+                _tts_initialized = True
+                logger.error("✅ GLOBAL TTS INITIALIZED SUCCESSFULLY!")
+            else:
+                logger.error("❌ GLOBAL TTS INITIALIZATION FAILED!")
+        except Exception as e:
+            logger.error(f"❌ GLOBAL TTS INIT ERROR: {e}")
+    return _tts_initialized
+
 # Inspiring quotes
 # Quick acknowledgment responses (instant, while thinking)
 QUICK_RESPONSES = [
@@ -1605,14 +1626,14 @@ async def test_websocket_debug(websocket: WebSocket):
                 # Send immediate simple test message
                 logger.error("🔊 SENDING IMMEDIATE TEST MESSAGE")
                 test_message = "WebSocket is working! You should hear this message clearly."
-                
+
                 try:
-                    from simple_tts import initialize_simple_tts, generate_simple_speech
-                    
-                    # Initialize TTS
-                    logger.error("🔧 INITIALIZING TTS FOR WEBSOCKET...")
-                    tts_ready = await initialize_simple_tts()
-                    if tts_ready:
+                    # Ensure TTS is initialized globally
+                    logger.error("🔧 ENSURING GLOBAL TTS IS READY...")
+                    if not await ensure_tts_initialized():
+                        logger.error("❌ GLOBAL TTS INIT FAILED - CANNOT SEND GREETING")
+                    else:
+                        from simple_tts import generate_simple_speech
                         logger.error("✅ TTS READY - GENERATING AUDIO...")
                         # Generate test audio
                         wav_data = await generate_simple_speech(test_message)
@@ -1679,15 +1700,14 @@ async def test_websocket_debug(websocket: WebSocket):
 
                         logger.error(f"🔊🔊🔊 GENERATING RESPONSE: '{response_text}'")
 
-                        # Initialize TTS if needed
-                        logger.error("🚀🚀🚀 NEW CODE IS RUNNING - TTS INIT CHECK!")
-                        from simple_tts import initialize_simple_tts
-                        if not hasattr(websocket, 'tts_initialized'):
-                            logger.error("🔧 Initializing TTS for responses...")
-                            await initialize_simple_tts()
-                            websocket.tts_initialized = True
-                            logger.error("✅ TTS INITIALIZED SUCCESSFULLY!")
+                        # Ensure TTS is initialized globally
+                        logger.error("🚀🚀🚀 CHECKING GLOBAL TTS INITIALIZATION...")
+                        if not await ensure_tts_initialized():
+                            logger.error("❌ TTS NOT INITIALIZED - CANNOT GENERATE AUDIO")
+                            continue
+                        logger.error("✅ TTS IS READY - GENERATING AUDIO...")
 
+                        from simple_tts import generate_simple_speech
                         wav_data = await generate_simple_speech(response_text)
                         
                         if wav_data:
