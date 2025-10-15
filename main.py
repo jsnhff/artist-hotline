@@ -1654,9 +1654,7 @@ async def test_websocket_debug(websocket: WebSocket):
                             logger.error("✅✅✅ SENT AUDIO TO TWILIO - YOU SHOULD HEAR THIS!")
                         else:
                             logger.error("❌ FAILED TO GENERATE AUDIO")
-                    else:
-                        logger.error("❌ TTS INITIALIZATION FAILED")
-                        
+
                 except Exception as e:
                     logger.error(f"❌❌❌ WEBSOCKET ERROR: {e}")
                     import traceback
