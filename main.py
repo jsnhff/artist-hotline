@@ -505,12 +505,17 @@ async def stream_speech_to_twilio(text: str, twilio_websocket: WebSocket, stream
                             if twilio_websocket.client_state.name == "CONNECTED":
                                 await twilio_websocket.send_text(json.dumps(media_message))
                                 logger.debug(f"✅ Sent converted audio chunk {chunk_count} to Twilio")
+                                # Small delay to prevent overwhelming the connection
+                                await asyncio.sleep(0.02)  # 20ms delay between chunks
                             else:
-                                logger.error(f"Twilio WebSocket not connected (state: {twilio_websocket.client_state.name})")
-                                break
+                                logger.warning(f"Twilio WebSocket not connected (state: {twilio_websocket.client_state.name}), skipping chunk")
+                                # Don't break - try to continue in case connection recovers
+                        except websockets.exceptions.ConnectionClosed:
+                            logger.warning(f"Twilio WebSocket closed, stopping audio stream")
+                            break  # Connection definitively closed
                         except Exception as send_error:
-                            logger.error(f"Failed to send audio to Twilio: {send_error}")
-                            break  # Stop trying to send if connection is broken
+                            logger.warning(f"Failed to send audio chunk to Twilio: {send_error}")
+                            # Don't break on transient errors - keep trying
 
                     if data.get("isFinal"):
                         logger.info(f"✅ Finished streaming: {chunk_count} chunks")
