@@ -1678,17 +1678,47 @@ async def test_websocket_debug(websocket: WebSocket):
                 # Initialize counters if not present
                 if not hasattr(websocket, 'audio_chunk_count'):
                     websocket.audio_chunk_count = 0
+                    websocket.last_audio_time = time.time()
                     websocket.last_response_time = 0
-                
+                    websocket.silence_task = None
+
                 websocket.audio_chunk_count += 1
-                
-                # Log every 10 chunks so we know audio is coming in
-                if websocket.audio_chunk_count % 10 == 0:
+                websocket.last_audio_time = time.time()
+
+                # Log every 100 chunks so we know audio is coming in
+                if websocket.audio_chunk_count % 100 == 0:
                     logger.info(f"📥 Received {websocket.audio_chunk_count} audio chunks ({len(audio_chunk)} bytes each)")
 
-                # TODO: Implement proper conversation flow with STT and silence detection
-                # For now, just receive audio without auto-responding
-                # This allows the user to actually speak without interruption
+                # Simple silence detection: Respond after 2 seconds of silence
+                # Cancel any pending silence task
+                if websocket.silence_task and not websocket.silence_task.done():
+                    websocket.silence_task.cancel()
+
+                # Create new silence detection task
+                async def check_silence():
+                    await asyncio.sleep(2.0)  # Wait 2 seconds
+                    # Check if still silent
+                    if time.time() - websocket.last_audio_time >= 1.9:
+                        # User stopped talking, send acknowledgment
+                        current_time = time.time()
+                        if current_time - websocket.last_response_time > 3:
+                            logger.info("🔇 Silence detected, sending response")
+                            responses = [
+                                "That's interesting! Tell me more.",
+                                "I hear you! Keep going.",
+                                "Yeah, I'm following. What else?",
+                                "Interesting perspective! Continue.",
+                                "Got it. What happens next?"
+                            ]
+                            response_text = responses[websocket.audio_chunk_count % len(responses)]
+                            try:
+                                await stream_speech_to_twilio(response_text, websocket, stream_sid)
+                                websocket.last_response_time = current_time
+                                logger.info(f"✅ Sent acknowledgment: '{response_text}'")
+                            except Exception as e:
+                                logger.error(f"Failed to send response: {e}")
+
+                websocket.silence_task = asyncio.create_task(check_silence())
 
                 # DISABLED: Auto-trigger logic (was causing continuous talking loop)
                 # current_time = time.time()
