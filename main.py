@@ -1534,7 +1534,7 @@ async def test_websocket_debug(websocket: WebSocket):
     import os
     try:
         await websocket.accept()
-        logger.error("🚀🚀🚀 TWILIO WEBSOCKET CONNECTED!!! 🚀🚀🚀")
+        logger.info("WebSocket connected to Twilio Media Stream")
         
         # Don't send initial message - wait for Twilio events
         # Twilio will send: connected, start, media, closed
@@ -1546,7 +1546,7 @@ async def test_websocket_debug(websocket: WebSocket):
             data = json.loads(message)
             
             event = data.get('event', 'unknown')
-            logger.error(f"🔍🔍🔍 WEBSOCKET EVENT: {event} - Data: {list(data.keys())}")
+            logger.debug(f"WebSocket event: {event}")
             
             if event == 'test_sine_wave':
                 # Send back the sine wave we generated earlier
@@ -1646,7 +1646,7 @@ async def test_websocket_debug(websocket: WebSocket):
             elif event == 'start':
                 stream_sid = data['start']['streamSid']
                 call_sid = data['start']['callSid']
-                logger.error(f"🚀🚀🚀 WEBSOCKET START EVENT - Stream: {stream_sid}, Call: {call_sid}")
+                logger.info(f"WebSocket stream started - Stream: {stream_sid}, Call: {call_sid}")
 
                 # Store stream info for later use
                 websocket.stream_sid = stream_sid
@@ -1665,9 +1665,9 @@ async def test_websocket_debug(websocket: WebSocket):
                     logger.info("✅ Sent greeting to caller via ElevenLabs streaming")
 
                 except Exception as e:
-                    logger.error(f"❌❌❌ ELEVENLABS STREAMING ERROR: {e}")
+                    logger.error(f"ElevenLabs streaming error: {e}")
                     import traceback
-                    logger.error(f"FULL TRACEBACK: {traceback.format_exc()}")
+                    logger.debug(f"Traceback: {traceback.format_exc()}")
             
             elif event == 'media':
                 # Handle incoming audio from caller
@@ -1727,27 +1727,6 @@ async def test_websocket_debug(websocket: WebSocket):
                                     logger.error(f"Failed to send response: {e}")
 
                     websocket.silence_task = asyncio.create_task(check_silence())
-
-                # DISABLED: Auto-trigger logic (was causing continuous talking loop)
-                # current_time = time.time()
-                # if (websocket.audio_chunk_count % 10 == 0 and
-                #     current_time - websocket.last_response_time > 1):
-                #     logger.error(f"🎤🎤🎤 TRIGGERING RESPONSE AFTER {websocket.audio_chunk_count} CHUNKS")
-                #     try:
-                #         responses = [...]
-                #         response_text = responses[websocket.audio_chunk_count // 10 % len(responses)]
-                #
-                #         logger.error(f"🔊🔊🔊 GENERATING RESPONSE: '{response_text}'")
-                #
-                #         # Use ElevenLabs streaming with proper audio conversion
-                #         await stream_speech_to_twilio(response_text, websocket, stream_sid)
-                #         websocket.last_response_time = current_time
-                #         logger.error(f"✅ Debug: Sent response '{response_text}' after {websocket.audio_chunk_count} chunks")
-                #
-                #     except Exception as e:
-                #         logger.error(f"❌ Debug: Response generation failed - {e}")
-                #         import traceback
-                #         logger.error(f"Full response error: {traceback.format_exc()}")
             
             elif event == 'closed':
                 logger.info("🔍 Debug: Media stream closed")
