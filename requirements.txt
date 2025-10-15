@@ -11,6 +11,7 @@ numpy>=1.24.0
 
 # Audio processing for WebSocket streaming (MP3 to µ-law conversion)
 pydub>=0.25.1
+pyaudioop>=0.1.0  # Replacement for audioop in Python 3.13+
 
 # Optional dependencies for development/testing
 # Simple TTS fallback
