@@ -1684,36 +1684,32 @@ async def test_websocket_debug(websocket: WebSocket):
                 
                 # Log every 10 chunks so we know audio is coming in
                 if websocket.audio_chunk_count % 10 == 0:
-                    logger.error(f"📥📥📥 RECEIVED {websocket.audio_chunk_count} AUDIO CHUNKS - {len(audio_chunk)} bytes")
-                
-                # Respond after receiving substantial audio - every 10 chunks (roughly every 0.2 seconds)
-                current_time = time.time()
-                if (websocket.audio_chunk_count % 10 == 0 and
-                    current_time - websocket.last_response_time > 1):
+                    logger.info(f"📥 Received {websocket.audio_chunk_count} audio chunks ({len(audio_chunk)} bytes each)")
 
-                    logger.error(f"🎤🎤🎤 TRIGGERING RESPONSE AFTER {websocket.audio_chunk_count} CHUNKS")
+                # TODO: Implement proper conversation flow with STT and silence detection
+                # For now, just receive audio without auto-responding
+                # This allows the user to actually speak without interruption
 
-                    try:
-                        responses = [
-                            "I hear you loud and clear!",
-                            "Yes, I can hear you talking!",
-                            "This is working perfectly!",
-                            "Great audio quality!",
-                            "Keep talking, I'm listening!"
-                        ]
-                        response_text = responses[websocket.audio_chunk_count // 10 % len(responses)]
-
-                        logger.error(f"🔊🔊🔊 GENERATING RESPONSE: '{response_text}'")
-
-                        # Use ElevenLabs streaming with proper audio conversion
-                        await stream_speech_to_twilio(response_text, websocket, stream_sid)
-                        websocket.last_response_time = current_time
-                        logger.error(f"✅ Debug: Sent response '{response_text}' after {websocket.audio_chunk_count} chunks")
-
-                    except Exception as e:
-                        logger.error(f"❌ Debug: Response generation failed - {e}")
-                        import traceback
-                        logger.error(f"Full response error: {traceback.format_exc()}")
+                # DISABLED: Auto-trigger logic (was causing continuous talking loop)
+                # current_time = time.time()
+                # if (websocket.audio_chunk_count % 10 == 0 and
+                #     current_time - websocket.last_response_time > 1):
+                #     logger.error(f"🎤🎤🎤 TRIGGERING RESPONSE AFTER {websocket.audio_chunk_count} CHUNKS")
+                #     try:
+                #         responses = [...]
+                #         response_text = responses[websocket.audio_chunk_count // 10 % len(responses)]
+                #
+                #         logger.error(f"🔊🔊🔊 GENERATING RESPONSE: '{response_text}'")
+                #
+                #         # Use ElevenLabs streaming with proper audio conversion
+                #         await stream_speech_to_twilio(response_text, websocket, stream_sid)
+                #         websocket.last_response_time = current_time
+                #         logger.error(f"✅ Debug: Sent response '{response_text}' after {websocket.audio_chunk_count} chunks")
+                #
+                #     except Exception as e:
+                #         logger.error(f"❌ Debug: Response generation failed - {e}")
+                #         import traceback
+                #         logger.error(f"Full response error: {traceback.format_exc()}")
             
             elif event == 'closed':
                 logger.info("🔍 Debug: Media stream closed")
