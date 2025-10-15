@@ -1679,46 +1679,54 @@ async def test_websocket_debug(websocket: WebSocket):
                 if not hasattr(websocket, 'audio_chunk_count'):
                     websocket.audio_chunk_count = 0
                     websocket.last_audio_time = time.time()
-                    websocket.last_response_time = 0
+                    websocket.last_response_time = time.time()  # Set to now so greeting doesn't trigger silence detection
                     websocket.silence_task = None
+                    websocket.greeting_complete = False
 
                 websocket.audio_chunk_count += 1
                 websocket.last_audio_time = time.time()
+
+                # Mark greeting as complete after receiving substantial audio (user is speaking)
+                if websocket.audio_chunk_count > 100 and not websocket.greeting_complete:
+                    websocket.greeting_complete = True
+                    logger.info("👤 User started speaking, enabling silence detection")
 
                 # Log every 100 chunks so we know audio is coming in
                 if websocket.audio_chunk_count % 100 == 0:
                     logger.info(f"📥 Received {websocket.audio_chunk_count} audio chunks ({len(audio_chunk)} bytes each)")
 
-                # Simple silence detection: Respond after 2 seconds of silence
-                # Cancel any pending silence task
-                if websocket.silence_task and not websocket.silence_task.done():
-                    websocket.silence_task.cancel()
+                # Only use silence detection AFTER user has started speaking (greeting is done)
+                if websocket.greeting_complete:
+                    # Simple silence detection: Respond after 3 seconds of silence
+                    # Cancel any pending silence task
+                    if websocket.silence_task and not websocket.silence_task.done():
+                        websocket.silence_task.cancel()
 
-                # Create new silence detection task
-                async def check_silence():
-                    await asyncio.sleep(2.0)  # Wait 2 seconds
-                    # Check if still silent
-                    if time.time() - websocket.last_audio_time >= 1.9:
-                        # User stopped talking, send acknowledgment
-                        current_time = time.time()
-                        if current_time - websocket.last_response_time > 3:
-                            logger.info("🔇 Silence detected, sending response")
-                            responses = [
-                                "That's interesting! Tell me more.",
-                                "I hear you! Keep going.",
-                                "Yeah, I'm following. What else?",
-                                "Interesting perspective! Continue.",
-                                "Got it. What happens next?"
-                            ]
-                            response_text = responses[websocket.audio_chunk_count % len(responses)]
-                            try:
-                                await stream_speech_to_twilio(response_text, websocket, stream_sid)
-                                websocket.last_response_time = current_time
-                                logger.info(f"✅ Sent acknowledgment: '{response_text}'")
-                            except Exception as e:
-                                logger.error(f"Failed to send response: {e}")
+                    # Create new silence detection task
+                    async def check_silence():
+                        await asyncio.sleep(3.0)  # Wait 3 seconds (increased from 2)
+                        # Check if still silent
+                        if time.time() - websocket.last_audio_time >= 2.9:
+                            # User stopped talking, send acknowledgment
+                            current_time = time.time()
+                            if current_time - websocket.last_response_time > 5:  # Increased cooldown to 5 seconds
+                                logger.info("🔇 Silence detected, sending response")
+                                responses = [
+                                    "That's interesting! Tell me more.",
+                                    "I hear you! Keep going.",
+                                    "Yeah, I'm following. What else?",
+                                    "Interesting perspective! Continue.",
+                                    "Got it. What happens next?"
+                                ]
+                                response_text = responses[websocket.audio_chunk_count % len(responses)]
+                                try:
+                                    await stream_speech_to_twilio(response_text, websocket, stream_sid)
+                                    websocket.last_response_time = current_time
+                                    logger.info(f"✅ Sent acknowledgment: '{response_text}'")
+                                except Exception as e:
+                                    logger.error(f"Failed to send response: {e}")
 
-                websocket.silence_task = asyncio.create_task(check_silence())
+                    websocket.silence_task = asyncio.create_task(check_silence())
 
                 # DISABLED: Auto-trigger logic (was causing continuous talking loop)
                 # current_time = time.time()
@@ -1852,20 +1860,20 @@ async def debug_voice_handler(request: Request):
         response.say("Debug system error occurred")
         return Response(content=str(response), media_type="application/xml")
 
-@app.api_route("/debug-websocket-voice", methods=["GET", "POST"])  
+@app.api_route("/debug-websocket-voice", methods=["GET", "POST"])
 async def debug_websocket_voice_handler(request: Request):
     """WebSocket-only debug voice handler - now that we know WebSockets work!"""
     try:
         response = VoiceResponse()
-        response.say("Connecting to working WebSocket streaming system...")
-        
-        # Connect to our fixed WebSocket
+        # No Twilio TTS announcement - go straight to WebSocket streaming
+
+        # Connect to our WebSocket for streaming audio
         connect = response.connect()
         ws_url = config.BASE_URL.replace("https://", "wss://").replace("http://", "ws://")
         debug_url = f"{ws_url}/test-websocket-debug"
         connect.stream(url=debug_url)
-        
-        logger.info("📞 WebSocket Debug voice handler - connecting to WORKING WebSocket")
+
+        logger.info("📞 WebSocket voice handler - connecting directly to streaming endpoint")
         return Response(content=str(response), media_type="application/xml")
         
     except Exception as e:
