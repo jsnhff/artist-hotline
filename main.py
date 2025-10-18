@@ -1775,12 +1775,12 @@ async def test_websocket_debug(websocket: WebSocket):
                     if not is_speech and (silence_task is None or silence_task.done()):
                         # Create new silence detection task
                         async def check_silence():
-                            await asyncio.sleep(3.0)  # Wait 3 seconds
+                            await asyncio.sleep(1.5)  # Wait 1.5 seconds (faster response)
                             # Check if still silent
                             last_audio = getattr(websocket, 'last_audio_time', time.time())
                             time_since_speech = time.time() - last_audio
                             logger.info(f"⏱️ Checking silence: {time_since_speech:.1f}s since last speech")
-                            if time_since_speech >= 2.9:
+                            if time_since_speech >= 1.4:
                                 # User stopped talking, transcribe and respond
                                 current_time = time.time()
                                 if current_time - websocket.last_response_time > 5:  # Cooldown
@@ -1797,22 +1797,35 @@ async def test_websocket_debug(websocket: WebSocket):
                                             transcription = await transcribe_audio_buffer(audio_data)
 
                                             if transcription:
-                                                # Generate intelligent response with GPT
+                                                # Initialize conversation history if needed
+                                                if not hasattr(websocket, 'conversation_history'):
+                                                    websocket.conversation_history = [
+                                                        {"role": "system", "content": "You are Synthetic Jason, an AI version of artist Jason Huff. You're weird, obsessed with art, and love discussing creative ideas. Keep responses under 30 words. You already introduced yourself at the start of the call, so don't introduce yourself again - just respond naturally to what the user says."}
+                                                    ]
+
+                                                # Add user message to history
+                                                websocket.conversation_history.append({"role": "user", "content": transcription})
+
+                                                # Keep only last 10 messages (5 exchanges) to save tokens
+                                                if len(websocket.conversation_history) > 11:  # system + 10 messages
+                                                    websocket.conversation_history = [websocket.conversation_history[0]] + websocket.conversation_history[-10:]
+
+                                                # Generate intelligent response with GPT-4o-mini (faster + cheaper)
                                                 from openai import OpenAI
                                                 client = OpenAI(api_key=config.OPENAI_API_KEY)
 
                                                 response = client.chat.completions.create(
-                                                    model="gpt-4",
-                                                    messages=[
-                                                        {"role": "system", "content": "You are Synthetic Jason, an AI version of artist Jason Huff. You're weird, obsessed with art, love discussing creative ideas, and have a quirky personality. Keep responses conversational and under 50 words."},
-                                                        {"role": "user", "content": transcription}
-                                                    ],
-                                                    max_tokens=100,
-                                                    temperature=0.8
+                                                    model="gpt-4o-mini",  # 10x faster and cheaper than gpt-4
+                                                    messages=websocket.conversation_history,
+                                                    max_tokens=60,  # Shorter for faster responses
+                                                    temperature=0.9
                                                 )
 
                                                 response_text = response.choices[0].message.content.strip()
                                                 logger.info(f"💬 GPT response: '{response_text}'")
+
+                                                # Add assistant response to history
+                                                websocket.conversation_history.append({"role": "assistant", "content": response_text})
 
                                                 # Stream response via ElevenLabs
                                                 await stream_speech_to_twilio(response_text, websocket, stream_sid)
