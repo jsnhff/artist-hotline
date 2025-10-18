@@ -2046,16 +2046,23 @@ async def debug_voice_handler(request: Request):
 async def debug_websocket_voice_handler(request: Request):
     """WebSocket-only debug voice handler - now that we know WebSockets work!"""
     try:
+        # Get caller phone number from Twilio
+        form_data = await request.form()
+        from_number = form_data.get('From', 'unknown')
+
         response = VoiceResponse()
         # No Twilio TTS announcement - go straight to WebSocket streaming
 
-        # Connect to our WebSocket for streaming audio
+        # Connect to our WebSocket for streaming audio, pass phone number
         connect = response.connect()
         ws_url = config.BASE_URL.replace("https://", "wss://").replace("http://", "ws://")
         debug_url = f"{ws_url}/test-websocket-debug"
-        connect.stream(url=debug_url)
 
-        logger.info("📞 WebSocket voice handler - connecting directly to streaming endpoint")
+        # Pass phone number as custom parameter
+        stream = connect.stream(url=debug_url)
+        stream.parameter(name="phoneNumber", value=from_number)
+
+        logger.info(f"📞 WebSocket voice handler - caller: {from_number}")
         return Response(content=str(response), media_type="application/xml")
         
     except Exception as e:
