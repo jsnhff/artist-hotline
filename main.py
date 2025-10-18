@@ -1751,8 +1751,9 @@ async def test_websocket_debug(websocket: WebSocket):
                 if getattr(websocket, 'greeting_complete', False):
                     # Simple silence detection: Respond after 3 seconds of silence
                     # Cancel any pending silence task
-                    if websocket.silence_task and not websocket.silence_task.done():
-                        websocket.silence_task.cancel()
+                    silence_task = getattr(websocket, 'silence_task', None)
+                    if silence_task and not silence_task.done():
+                        silence_task.cancel()
 
                     # Create new silence detection task
                     async def check_silence():
