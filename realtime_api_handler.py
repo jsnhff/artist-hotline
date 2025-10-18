@@ -53,15 +53,35 @@ async def handle_realtime_api_call(twilio_ws: WebSocket, stream_sid: str, openai
             async def stream_twilio_to_openai():
                 """Forward audio from Twilio to OpenAI"""
                 try:
+                    chunk_count = 0
                     async for message in twilio_ws.iter_text():
                         data = json.loads(message)
 
                         if data.get('event') == 'media':
-                            # Forward µ-law audio to OpenAI
+                            chunk_count += 1
+                            if chunk_count % 100 == 0:
+                                logger.info(f"📤 Sent {chunk_count} audio chunks to OpenAI")
+                            # Convert µ-law to PCM16 for OpenAI
+                            import audioop
+
                             audio_payload = data['media']['payload']
+
+                            # Decode base64 µ-law
+                            mulaw_data = base64.b64decode(audio_payload)
+
+                            # Convert µ-law 8kHz to PCM16
+                            pcm_data = audioop.ulaw2lin(mulaw_data, 2)  # 2 bytes per sample
+
+                            # Resample from 8kHz to 24kHz (OpenAI expects 24kHz for PCM16)
+                            pcm_24k = audioop.ratecv(pcm_data, 2, 1, 8000, 24000, None)[0]
+
+                            # Encode to base64
+                            pcm_b64 = base64.b64encode(pcm_24k).decode('utf-8')
+
+                            # Send to OpenAI
                             audio_append = {
                                 "type": "input_audio_buffer.append",
-                                "audio": audio_payload  # Already base64 encoded µ-law
+                                "audio": pcm_b64
                             }
                             await openai_ws.send(json.dumps(audio_append))
 
@@ -75,20 +95,45 @@ async def handle_realtime_api_call(twilio_ws: WebSocket, stream_sid: str, openai
             async def stream_openai_to_twilio():
                 """Forward audio responses from OpenAI back to Twilio"""
                 try:
+                    response_count = 0
                     async for message in openai_ws:
                         response = json.loads(message)
 
+                        # Log all events for debugging
+                        event_type = response.get('type', 'unknown')
+                        if event_type not in ['response.audio.delta', 'input_audio_buffer.speech_started', 'input_audio_buffer.speech_stopped']:
+                            logger.info(f"📥 OpenAI event: {event_type}")
+
                         # Handle different event types
                         if response.get('type') == 'response.audio.delta':
-                            # OpenAI is sending audio data
+                            response_count += 1
+                            if response_count % 10 == 0:
+                                logger.info(f"📥 Received {response_count} audio responses from OpenAI")
+                            # OpenAI is sending PCM16 24kHz audio data
+                            import audioop
+
                             audio_payload = response.get('delta', '')
+                            if not audio_payload:
+                                continue
+
+                            # Decode base64 PCM16
+                            pcm_24k = base64.b64decode(audio_payload)
+
+                            # Resample from 24kHz to 8kHz
+                            pcm_8k = audioop.ratecv(pcm_24k, 2, 1, 24000, 8000, None)[0]
+
+                            # Convert PCM16 to µ-law
+                            mulaw_data = audioop.lin2ulaw(pcm_8k, 2)
+
+                            # Encode to base64
+                            mulaw_b64 = base64.b64encode(mulaw_data).decode('utf-8')
 
                             # Send to Twilio
                             media_message = {
                                 "event": "media",
                                 "streamSid": stream_sid,
                                 "media": {
-                                    "payload": audio_payload
+                                    "payload": mulaw_b64
                                 }
                             }
                             await twilio_ws.send_json(media_message)
