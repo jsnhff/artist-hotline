@@ -1736,7 +1736,8 @@ async def test_websocket_debug(websocket: WebSocket):
                 # µ-law audio: silent chunks have values near 127 (neutral), speech has variation
                 import audioop
                 rms = audioop.rms(audio_chunk, 1)  # Root mean square for µ-law (1 byte per sample)
-                is_speech = rms > 10  # Threshold for detecting speech vs silence
+                # Threshold: Background noise is ~30-60 RMS, actual speech is 100+ RMS
+                is_speech = rms > 80  # Raised threshold to filter out phone line noise
 
                 # Log RMS values to calibrate threshold
                 if websocket.audio_chunk_count % 100 == 0:
