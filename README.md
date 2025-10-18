@@ -1,24 +1,24 @@
-# Replicant Jason Voice Hotline
+# Artist Hotline - AI Voice Assistant
 
-A real-time AI voice hotline that lets callers speak with a synthetic version of Jason using Twilio, ElevenLabs, OpenAI, and the Vocode framework.
+A real-time AI voice hotline that lets callers have natural conversations with Synthetic Jason, an AI assistant powered by OpenAI and ElevenLabs.
 
 ## Features
 
-- **Real-time voice conversations** via Twilio phone calls
-- **AI-powered responses** using GPT-4
-- **Synthetic voice** using ElevenLabs voice cloning
-- **Phone call transcription** with Deepgram
-- **Warm, curious personality** as "Replicant Jason"
-- **FastAPI backend** for easy deployment
+- **Real-time voice conversations** via Twilio WebSocket streaming
+- **AI-powered responses** using GPT-4o-mini
+- **Natural text-to-speech** using ElevenLabs voice cloning
+- **Speech-to-text** with OpenAI Whisper
+- **Conversation memory** within each call
+- **Natural timing** with 2-second silence detection
+- **FastAPI backend** deployed on Railway
 
 ## Prerequisites
 
 Before setting up the project, you'll need accounts and API keys for:
 
-1. **OpenAI** - For GPT-4 conversations
+1. **OpenAI** - For GPT-4o-mini conversations and Whisper transcription
 2. **ElevenLabs** - For voice synthesis (with your voice cloned)
-3. **Twilio** - For phone number and call handling
-4. **Deepgram** - For speech-to-text transcription
+3. **Twilio** - For phone number and WebSocket call handling
 
 ## Setup Instructions
 
@@ -124,18 +124,14 @@ Once deployed, configure your Twilio phone number:
 
 ### Personality Customization
 
-Edit the `AGENT_PROMPT` in `vocode_config.py` to change Replicant Jason's personality, conversation style, and behavior.
+Edit the system prompt in the `get_ai_response()` function in `main.py` to change Synthetic Jason's personality, conversation style, and behavior.
 
 ### Voice Settings
 
-Adjust ElevenLabs voice parameters in `vocode_config.py`:
-- `stability`: Lower = more expressive, Higher = more consistent
-- `similarity_boost`: How much to match the original voice
-- `model_id`: Use `eleven_turbo_v2` for speed or `eleven_multilingual_v2` for quality
-
-### Transcription Settings
-
-Configure Deepgram settings in `vocode_config.py` for better transcription accuracy based on your use case.
+Adjust ElevenLabs voice parameters in `main.py`:
+- `voice_id`: Your cloned voice ID from ElevenLabs
+- `model_id`: Currently using `eleven_flash_v2_5` for speed
+- Adjust in the `generate_speech_with_elevenlabs()` function
 
 ## Troubleshooting
 
@@ -175,20 +171,35 @@ ngrok http 8000
 ## Architecture
 
 ```
-Caller → Twilio → FastAPI App → Vocode Framework
-                                     ↓
-                              ┌─────────────┐
-                              │   Vocode    │
-                              │ Orchestrator│
-                              └─────────────┘
-                                     ↓
+Caller → Twilio WebSocket → FastAPI App (main.py)
+              (µ-law audio)       ↓
+                          ┌─────────────────┐
+                          │ Silence Detect  │
+                          │  (2s pause)     │
+                          └────────┬────────┘
+                                   ↓
                  ┌─────────────────────────────────────┐
                  ↓                ↓                    ↓
           ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
-          │  Deepgram    │ │    OpenAI    │ │ ElevenLabs   │
-          │(Transcribe)  │ │   (GPT-4)    │ │ (Synthesize) │
+          │   Whisper    │ │ GPT-4o-mini  │ │ ElevenLabs   │
+          │(Transcribe)  │ │  (Respond)   │ │ (Synthesize) │
           └──────────────┘ └──────────────┘ └──────────────┘
+                                   ↓
+                          ┌─────────────────┐
+                          │ Audio Convert   │
+                          │ MP3 → µ-law     │
+                          └────────┬────────┘
+                                   ↓
+                          Back to caller via
+                          Twilio WebSocket
 ```
+
+## Documentation
+
+See the `docs/` directory for detailed documentation:
+- **docs/SESSION_FINAL_WRAPUP.md** - Complete system overview
+- **docs/CODE_CLEANUP_RECOMMENDATIONS.md** - Code cleanup guide
+- **docs/NEXT_STEPS.md** - Future improvements and roadmap
 
 ## License
 
