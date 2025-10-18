@@ -1763,66 +1763,71 @@ async def test_websocket_debug(websocket: WebSocket):
                 # Only use silence detection AFTER user has started speaking (greeting is done)
                 if getattr(websocket, 'greeting_complete', False):
                     # Simple silence detection: Respond after 3 seconds of silence
-                    # Cancel any pending silence task
+                    # Only create task if there isn't one already running
                     silence_task = getattr(websocket, 'silence_task', None)
-                    if silence_task and not silence_task.done():
+
+                    # If speech detected, cancel any pending silence task
+                    if is_speech and silence_task and not silence_task.done():
                         silence_task.cancel()
+                        websocket.silence_task = None
 
-                    # Create new silence detection task
-                    async def check_silence():
-                        await asyncio.sleep(3.0)  # Wait 3 seconds
-                        # Check if still silent
-                        time_since_speech = time.time() - websocket.last_audio_time
-                        logger.info(f"⏱️ Checking silence: {time_since_speech:.1f}s since last speech")
-                        if time_since_speech >= 2.9:
-                            # User stopped talking, transcribe and respond
-                            current_time = time.time()
-                            if current_time - websocket.last_response_time > 5:  # Cooldown
-                                logger.info("🔇 Silence detected, transcribing audio...")
+                    # If no speech and no task running, create new silence detection task
+                    if not is_speech and (silence_task is None or silence_task.done()):
+                        # Create new silence detection task
+                        async def check_silence():
+                            await asyncio.sleep(3.0)  # Wait 3 seconds
+                            # Check if still silent
+                            time_since_speech = time.time() - websocket.last_audio_time
+                            logger.info(f"⏱️ Checking silence: {time_since_speech:.1f}s since last speech")
+                            if time_since_speech >= 2.9:
+                                # User stopped talking, transcribe and respond
+                                current_time = time.time()
+                                if current_time - websocket.last_response_time > 5:  # Cooldown
+                                    logger.info("🔇 Silence detected, transcribing audio...")
 
-                                try:
-                                    # Get buffered audio and transcribe
-                                    audio_buffer = getattr(websocket, 'audio_buffer', [])
-                                    audio_data = b''.join(audio_buffer)
-                                    websocket.audio_buffer = []  # Clear buffer
+                                    try:
+                                        # Get buffered audio and transcribe
+                                        audio_buffer = getattr(websocket, 'audio_buffer', [])
+                                        audio_data = b''.join(audio_buffer)
+                                        websocket.audio_buffer = []  # Clear buffer
 
-                                    if len(audio_data) > 1000:  # Need substantial audio
-                                        # Transcribe with Whisper
-                                        transcription = await transcribe_audio_buffer(audio_data)
+                                        if len(audio_data) > 1000:  # Need substantial audio
+                                            # Transcribe with Whisper
+                                            transcription = await transcribe_audio_buffer(audio_data)
 
-                                        if transcription:
-                                            # Generate intelligent response with GPT
-                                            from openai import OpenAI
-                                            client = OpenAI(api_key=config.OPENAI_API_KEY)
+                                            if transcription:
+                                                # Generate intelligent response with GPT
+                                                from openai import OpenAI
+                                                client = OpenAI(api_key=config.OPENAI_API_KEY)
 
-                                            response = client.chat.completions.create(
-                                                model="gpt-4",
-                                                messages=[
-                                                    {"role": "system", "content": "You are Synthetic Jason, an AI version of artist Jason Huff. You're weird, obsessed with art, love discussing creative ideas, and have a quirky personality. Keep responses conversational and under 50 words."},
-                                                    {"role": "user", "content": transcription}
-                                                ],
-                                                max_tokens=100,
-                                                temperature=0.8
-                                            )
+                                                response = client.chat.completions.create(
+                                                    model="gpt-4",
+                                                    messages=[
+                                                        {"role": "system", "content": "You are Synthetic Jason, an AI version of artist Jason Huff. You're weird, obsessed with art, love discussing creative ideas, and have a quirky personality. Keep responses conversational and under 50 words."},
+                                                        {"role": "user", "content": transcription}
+                                                    ],
+                                                    max_tokens=100,
+                                                    temperature=0.8
+                                                )
 
-                                            response_text = response.choices[0].message.content.strip()
-                                            logger.info(f"💬 GPT response: '{response_text}'")
+                                                response_text = response.choices[0].message.content.strip()
+                                                logger.info(f"💬 GPT response: '{response_text}'")
 
-                                            # Stream response via ElevenLabs
-                                            await stream_speech_to_twilio(response_text, websocket, stream_sid)
-                                            websocket.last_response_time = current_time
-                                            logger.info(f"✅ Sent intelligent response")
+                                                # Stream response via ElevenLabs
+                                                await stream_speech_to_twilio(response_text, websocket, stream_sid)
+                                                websocket.last_response_time = current_time
+                                                logger.info(f"✅ Sent intelligent response")
+                                            else:
+                                                logger.warning("No transcription received, skipping response")
                                         else:
-                                            logger.warning("No transcription received, skipping response")
-                                    else:
-                                        logger.debug(f"Audio buffer too small: {len(audio_data)} bytes")
+                                            logger.debug(f"Audio buffer too small: {len(audio_data)} bytes")
 
-                                except Exception as e:
-                                    logger.error(f"Failed to generate response: {e}")
-                                    import traceback
-                                    logger.debug(f"Traceback: {traceback.format_exc()}")
+                                    except Exception as e:
+                                        logger.error(f"Failed to generate response: {e}")
+                                        import traceback
+                                        logger.debug(f"Traceback: {traceback.format_exc()}")
 
-                    websocket.silence_task = asyncio.create_task(check_silence())
+                        websocket.silence_task = asyncio.create_task(check_silence())
             
             elif event == 'closed':
                 logger.info("🔍 Debug: Media stream closed")
