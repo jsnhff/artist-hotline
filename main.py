@@ -1731,7 +1731,17 @@ async def test_websocket_debug(websocket: WebSocket):
                     websocket.audio_buffer = []  # Buffer for STT
 
                 websocket.audio_chunk_count += 1
-                websocket.last_audio_time = time.time()
+
+                # Detect if audio chunk contains actual speech (amplitude-based)
+                # µ-law audio: silent chunks have values near 127 (neutral), speech has variation
+                import audioop
+                rms = audioop.rms(audio_chunk, 1)  # Root mean square for µ-law (1 byte per sample)
+                is_speech = rms > 10  # Threshold for detecting speech vs silence
+
+                if is_speech:
+                    websocket.last_audio_time = time.time()
+                    if websocket.audio_chunk_count % 100 == 0:
+                        logger.debug(f"🎤 Speech detected (RMS: {rms})")
 
                 # Buffer audio chunks for transcription
                 if not hasattr(websocket, 'audio_buffer'):
