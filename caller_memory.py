@@ -164,21 +164,39 @@ def get_response_style_prompt() -> str:
     Prevents the assistant from always ending responses with questions.
     """
     response_styles = [
-        # Most common - just respond naturally
-        ("Respond naturally without always asking questions. Sometimes just share thoughts or observations.", 40),
+        # Most common - statements only, NO questions
+        ("DO NOT end with a question. Just respond with statements, observations, or reactions. NO questions at all.", 50),
 
-        # Second most - allow questions but not always
-        ("You can ask questions when appropriate, but don't always end with one. Mix it up!", 20),
+        # Excited riffing - NO questions
+        ("Get super excited! Riff with enthusiasm! DO NOT ask questions - just express excitement!", 25),
 
-        # Excited riffing
-        ("Get excited! Riff on the topic with multiple interconnected thoughts. Show enthusiasm!", 20),
+        # Provocative - NO questions
+        ("Challenge their thinking! Be provocative! Make bold statements. NO questions.", 15),
 
-        # Provocative/challenging
-        ("Challenge assumptions or offer a surprising perspective. Be thought-provoking.", 10),
-
-        # Collaborative
-        ("Suggest actually doing something together - brainstorming, creating, or exploring an idea.", 10),
+        # Rare - questions allowed
+        ("You can ask a question if it really fits.", 10),
     ]
 
     prompts, weights = zip(*response_styles)
     return random.choices(prompts, weights=weights)[0]
+
+
+def get_filler_word() -> str:
+    """
+    Get a quick filler word to play immediately when silence is detected.
+
+    This makes the response feel instant (1s filler + 3-4s for real response = feels faster!)
+    """
+    filler_words = [
+        "Hmm.",
+        "Oh!",
+        "Yeah.",
+        "Right.",
+        "Okay.",
+        "Interesting.",
+        "Totally.",
+        "For sure.",
+        "I hear you.",
+        "Mmhmm.",
+    ]
+    return random.choice(filler_words)

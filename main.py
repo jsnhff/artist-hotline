@@ -1797,6 +1797,15 @@ async def test_websocket_debug(websocket: WebSocket):
                                 if current_time - websocket.last_response_time > 5:  # Cooldown
                                     logger.info("🔇 Silence detected, transcribing audio...")
 
+                                    # Play instant filler word first for immediate feedback
+                                    try:
+                                        from caller_memory import get_filler_word
+                                        filler = get_filler_word()
+                                        await stream_speech_to_twilio(filler, websocket, stream_sid)
+                                        logger.info(f"🗣️ Played instant filler: '{filler}'")
+                                    except Exception as e:
+                                        logger.error(f"Failed to play filler word: {e}")
+
                                     try:
                                         # Get buffered audio and transcribe
                                         audio_buffer = getattr(websocket, 'audio_buffer', [])
