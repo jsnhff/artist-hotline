@@ -1,7 +1,4 @@
-# VoIP and audio processing (must be first - has strict version requirements)
-vocode==0.1.108
-
-# Core dependencies for production (compatible with vocode)
+# Core dependencies for production
 python-dotenv
 twilio
 httpx
