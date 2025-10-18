@@ -109,7 +109,7 @@ def generate_greeting(phone_number: str) -> str:
 
     # First time caller
     if not caller:
-        return "Hey! This is Synthetic Jason... I'm basically Jason Huff but weirder and more obsessed with art. What wild idea should we dream up together?"
+        return "Hey! This is Synthetic Jason... I'm basically Jason Huff but weirder and more obsessed with art. What wild idea should we dream up together? Banana break please!"
 
     time_since = get_time_since_last_call(phone_number)
     call_count = caller["call_count"]

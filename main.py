@@ -1816,12 +1816,15 @@ async def test_websocket_debug(websocket: WebSocket):
                                             # Transcribe with Whisper
                                             transcription = await transcribe_audio_buffer(audio_data)
 
-                                            # Filter out junk transcriptions (silence, noise, filler)
-                                            junk_phrases = ['. .', '..', 'you', 'thank you.', '.', ' ', 'huh', 'um', 'uh']
+                                            # Filter out junk transcriptions (silence, noise, very short filler)
+                                            # Only filter if transcription is ONLY these words (not part of a sentence)
+                                            junk_phrases = ['. .', '..', '.', ' ', 'huh', 'um', 'uh', 'hmm', 'mm', 'mhm']
+                                            transcription_clean = transcription.strip().lower()
+
                                             is_junk = (
                                                 not transcription or
-                                                transcription.strip().lower() in junk_phrases or
-                                                len(transcription.strip()) < 3
+                                                transcription_clean in junk_phrases or
+                                                len(transcription_clean) < 2  # Changed from 3 to 2
                                             )
 
                                             if transcription and not is_junk:
