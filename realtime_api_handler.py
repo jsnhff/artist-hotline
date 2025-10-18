@@ -49,6 +49,10 @@ async def handle_realtime_api_call(twilio_ws: WebSocket, stream_sid: str, openai
             # Send session configuration
             await send_session_update(openai_ws)
 
+            # Send initial greeting using the same voice as your current setup
+            greeting_text = "Hey! This is Synthetic Jason... I'm basically Jason Huff but weirder and more obsessed with art. What wild idea should we dream up together?"
+            await send_greeting(openai_ws, greeting_text)
+
             # Create bidirectional audio streaming tasks
             async def stream_twilio_to_openai():
                 """Forward audio from Twilio to OpenAI"""
@@ -166,6 +170,35 @@ async def handle_realtime_api_call(twilio_ws: WebSocket, stream_sid: str, openai
         raise
 
 
+async def send_greeting(openai_ws, text: str):
+    """
+    Send an initial greeting message that the AI will speak.
+
+    This triggers an immediate response from the AI with the greeting text.
+    """
+    greeting_message = {
+        "type": "conversation.item.create",
+        "item": {
+            "type": "message",
+            "role": "user",
+            "content": [
+                {
+                    "type": "input_text",
+                    "text": f"[SYSTEM: Say this greeting to the user] {text}"
+                }
+            ]
+        }
+    }
+    await openai_ws.send(json.dumps(greeting_message))
+
+    # Trigger response generation
+    response_create = {
+        "type": "response.create"
+    }
+    await openai_ws.send(json.dumps(response_create))
+    logger.info("🔊 Sent greeting to Realtime API")
+
+
 async def send_session_update(openai_ws):
     """
     Configure the OpenAI Realtime API session.
@@ -186,7 +219,7 @@ You're weird, obsessed with art, love discussing creative ideas, and have a quir
 Keep responses conversational and under 30 words.
 You already introduced yourself at the start of the call, so don't introduce yourself again.""",
 
-            "voice": "alloy",  # Options: alloy, echo, shimmer
+            "voice": "shimmer",  # Options: alloy (neutral), echo (deep), shimmer (energetic)
 
             "input_audio_format": "pcm16",  # Twilio sends µ-law but we'll convert
             "output_audio_format": "pcm16",  # We'll convert back to µ-law
