@@ -1716,15 +1716,25 @@ async def test_websocket_debug(websocket: WebSocket):
                 logger.info(f"🔊 Sending {'returning caller' if is_returning else 'first-time'} greeting")
 
                 try:
+                    # Mark that we're playing TTS (blocks silence detection)
+                    websocket.is_playing_tts = True
+
                     # Use the production-ready stream_speech_to_twilio function
                     # This handles ElevenLabs WebSocket + MP3 to µ-law conversion
                     await stream_speech_to_twilio(greeting_message, websocket, stream_sid)
                     logger.info("✅ Sent greeting to caller via ElevenLabs streaming")
 
+                    # Mark greeting as complete and update timing
+                    websocket.greeting_complete = True
+                    websocket.last_response_time = time.time()
+                    websocket.is_playing_tts = False
+                    logger.info(f"✅ Greeting complete - ready for user input")
+
                 except Exception as e:
                     logger.error(f"ElevenLabs streaming error: {e}")
                     import traceback
                     logger.debug(f"Traceback: {traceback.format_exc()}")
+                    websocket.is_playing_tts = False
             
             elif event == 'media':
                 # Handle incoming audio from caller
@@ -1794,17 +1804,33 @@ async def test_websocket_debug(websocket: WebSocket):
                             if time_since_speech >= 1.9:
                                 # User stopped talking, transcribe and respond
                                 current_time = time.time()
+
+                                # Skip if greeting hasn't completed yet
+                                if not getattr(websocket, 'greeting_complete', False):
+                                    logger.info("⏸️  Skipping silence detection - greeting still playing")
+                                    continue
+
+                                # Skip if we're currently playing TTS
+                                if getattr(websocket, 'is_playing_tts', False):
+                                    logger.info("⏸️  Skipping silence detection - AI is speaking")
+                                    continue
+
                                 if current_time - websocket.last_response_time > 5:  # Cooldown
                                     logger.info("🔇 Silence detected, transcribing audio...")
 
                                     # Play instant filler word first for immediate feedback
-                                    try:
-                                        from caller_memory import get_filler_word
-                                        filler = get_filler_word()
-                                        await stream_speech_to_twilio(filler, websocket, stream_sid)
-                                        logger.info(f"🗣️ Played instant filler: '{filler}'")
-                                    except Exception as e:
-                                        logger.error(f"Failed to play filler word: {e}")
+                                    # (only if greeting is complete)
+                                    if websocket.greeting_complete:
+                                        try:
+                                            from caller_memory import get_filler_word
+                                            filler = get_filler_word()
+                                            websocket.is_playing_tts = True
+                                            await stream_speech_to_twilio(filler, websocket, stream_sid)
+                                            websocket.is_playing_tts = False
+                                            logger.info(f"🗣️ Played instant filler: '{filler}'")
+                                        except Exception as e:
+                                            logger.error(f"Failed to play filler word: {e}")
+                                            websocket.is_playing_tts = False
 
                                     try:
                                         # Get buffered audio and transcribe
@@ -1867,9 +1893,11 @@ async def test_websocket_debug(websocket: WebSocket):
                                                 # Add assistant response to history
                                                 websocket.conversation_history.append({"role": "assistant", "content": response_text})
 
-                                                # Stream response via ElevenLabs
+                                                # Stream response via ElevenLabs (protected from interference)
+                                                websocket.is_playing_tts = True
                                                 await stream_speech_to_twilio(response_text, websocket, stream_sid)
-                                                websocket.last_response_time = current_time
+                                                websocket.is_playing_tts = False
+                                                websocket.last_response_time = time.time()
                                                 logger.info(f"✅ Sent intelligent response")
                                             else:
                                                 logger.info(f"🗑️ Filtered junk transcription: '{transcription}'")
