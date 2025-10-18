@@ -1808,12 +1808,12 @@ async def test_websocket_debug(websocket: WebSocket):
                                 # Skip if greeting hasn't completed yet
                                 if not getattr(websocket, 'greeting_complete', False):
                                     logger.info("⏸️  Skipping silence detection - greeting still playing")
-                                    continue
+                                    return
 
                                 # Skip if we're currently playing TTS
                                 if getattr(websocket, 'is_playing_tts', False):
                                     logger.info("⏸️  Skipping silence detection - AI is speaking")
-                                    continue
+                                    return
 
                                 if current_time - websocket.last_response_time > 5:  # Cooldown
                                     logger.info("🔇 Silence detected, transcribing audio...")
