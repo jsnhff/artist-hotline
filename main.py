@@ -51,6 +51,9 @@ class Config:
     RAILWAY_PUBLIC_DOMAIN: str = os.getenv("RAILWAY_PUBLIC_DOMAIN", "")
     BASE_URL: str = os.getenv("BASE_URL", f"https://{RAILWAY_PUBLIC_DOMAIN}" if RAILWAY_PUBLIC_DOMAIN else "https://artist-hotline-production.up.railway.app")
     PORT: int = int(os.getenv("PORT", "8000"))
+
+    # Feature Flags
+    USE_REALTIME_API: bool = os.getenv("USE_REALTIME_API", "false").lower() == "true"
     
     # Feature Flags
     USE_STREAMING: bool = os.getenv("USE_STREAMING", "false").lower() == "true"
@@ -1865,6 +1868,83 @@ async def test_websocket_debug(websocket: WebSocket):
         logger.info("🔍 Debug WebSocket disconnected")
     except Exception as e:
         logger.error(f"Debug WebSocket error: {e}")
+
+
+# ============================================================================
+# OpenAI Realtime API Endpoints (Feature Flag: USE_REALTIME_API)
+# ============================================================================
+
+@app.websocket("/realtime-stream")
+async def realtime_websocket_stream(websocket: WebSocket):
+    """
+    Ultra-low latency voice conversation using OpenAI Realtime API.
+
+    Latency: ~500ms-1s (vs 4-5s for Whisper+GPT)
+    Cost: ~$0.06/minute (vs ~$0.02/minute)
+
+    This is the premium, ChatGPT-Voice-Mode quality experience.
+    """
+    await websocket.accept()
+
+    try:
+        from realtime_api_handler import handle_realtime_api_call
+
+        stream_sid = None
+
+        # Wait for stream start
+        async for message in websocket.iter_text():
+            data = json.loads(message)
+
+            if data.get('event') == 'start':
+                stream_sid = data['start']['streamSid']
+                logger.info(f"🚀 Realtime API stream started - Stream: {stream_sid}")
+                break
+
+        if not stream_sid:
+            logger.error("No stream ID received")
+            return
+
+        # Handle the call with Realtime API
+        await handle_realtime_api_call(websocket, stream_sid, config.OPENAI_API_KEY)
+
+    except WebSocketDisconnect:
+        logger.info("Realtime API WebSocket disconnected")
+    except Exception as e:
+        logger.error(f"Realtime API WebSocket error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+
+
+@app.post("/realtime-voice")
+async def realtime_voice_handler(request: Request):
+    """
+    TwiML handler that routes to OpenAI Realtime API endpoint.
+
+    This is activated when USE_REALTIME_API=true
+    """
+    try:
+        response = VoiceResponse()
+
+        # Auto-detect Railway domain
+        host = request.headers.get("host", "artist-hotline-production.up.railway.app")
+        ws_url = f"wss://{host}/realtime-stream"
+
+        logger.info(f"📞 Realtime API call - connecting to {ws_url}")
+
+        # Connect to Realtime API WebSocket
+        connect = Connect()
+        stream = Stream(url=ws_url)
+        connect.append(stream)
+        response.append(connect)
+
+        return Response(content=str(response), media_type="application/xml")
+
+    except Exception as e:
+        logger.error(f"Realtime API voice handler error: {e}")
+        response = VoiceResponse()
+        response.say("Sorry, there was an error connecting. Please try again.")
+        return Response(content=str(response), media_type="application/xml")
+
 
 @app.api_route("/debug-voice-handler", methods=["GET", "POST"])
 async def debug_voice_handler(request: Request):
