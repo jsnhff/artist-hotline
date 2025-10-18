@@ -1738,10 +1738,12 @@ async def test_websocket_debug(websocket: WebSocket):
                 rms = audioop.rms(audio_chunk, 1)  # Root mean square for µ-law (1 byte per sample)
                 is_speech = rms > 10  # Threshold for detecting speech vs silence
 
+                # Log RMS values to calibrate threshold
+                if websocket.audio_chunk_count % 100 == 0:
+                    logger.info(f"🔊 Audio RMS: {rms}, is_speech: {is_speech}")
+
                 if is_speech:
                     websocket.last_audio_time = time.time()
-                    if websocket.audio_chunk_count % 100 == 0:
-                        logger.debug(f"🎤 Speech detected (RMS: {rms})")
 
                 # Buffer audio chunks for transcription
                 if not hasattr(websocket, 'audio_buffer'):
@@ -1769,7 +1771,9 @@ async def test_websocket_debug(websocket: WebSocket):
                     async def check_silence():
                         await asyncio.sleep(3.0)  # Wait 3 seconds
                         # Check if still silent
-                        if time.time() - websocket.last_audio_time >= 2.9:
+                        time_since_speech = time.time() - websocket.last_audio_time
+                        logger.info(f"⏱️ Checking silence: {time_since_speech:.1f}s since last speech")
+                        if time_since_speech >= 2.9:
                             # User stopped talking, transcribe and respond
                             current_time = time.time()
                             if current_time - websocket.last_response_time > 5:  # Cooldown
