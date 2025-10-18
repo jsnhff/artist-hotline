@@ -1,0 +1,8 @@
+# Test Script: Quick Check-in
+# Tests: Short exchanges, filler words, fast responses
+
+Hey there
+Just thinking about art
+Cool
+Tell me more
+That's interesting

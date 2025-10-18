@@ -8,9 +8,28 @@ A real-time AI voice hotline that lets callers have natural conversations with S
 - **AI-powered responses** using GPT-4o-mini
 - **Natural text-to-speech** using ElevenLabs voice cloning
 - **Speech-to-text** with OpenAI Whisper
-- **Conversation memory** within each call
+- **Caller memory system** - Personalized greetings for returning callers
+- **Response variety** - Avoids repetitive questions, varied conversation styles
+- **Instant feedback** - Filler words for immediate acknowledgment
 - **Natural timing** with 2-second silence detection
 - **FastAPI backend** deployed on Railway
+
+## Testing
+
+Test your conversation logic without making phone calls:
+
+```bash
+# Interactive testing (chat with AI in terminal)
+python call_simulator.py
+
+# Test greeting variations
+python call_simulator.py --test-greetings
+
+# Run conversation scripts
+python call_simulator.py --test-conversation test_scripts/ai_art_discussion.txt
+```
+
+See [docs/CALL_SIMULATOR.md](docs/CALL_SIMULATOR.md) for complete testing guide.
 
 ## Prerequisites
 

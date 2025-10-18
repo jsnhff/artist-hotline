@@ -1,0 +1,8 @@
+# Test Script: AI Art Discussion
+# Tests: Response variety, no repeated questions
+
+I'm curious about AI art
+What makes it different from traditional art?
+How do you think about authenticity?
+Can AI really be creative?
+What would you create with AI?
