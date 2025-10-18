@@ -1777,7 +1777,8 @@ async def test_websocket_debug(websocket: WebSocket):
                         async def check_silence():
                             await asyncio.sleep(3.0)  # Wait 3 seconds
                             # Check if still silent
-                            time_since_speech = time.time() - websocket.last_audio_time
+                            last_audio = getattr(websocket, 'last_audio_time', time.time())
+                            time_since_speech = time.time() - last_audio
                             logger.info(f"⏱️ Checking silence: {time_since_speech:.1f}s since last speech")
                             if time_since_speech >= 2.9:
                                 # User stopped talking, transcribe and respond
