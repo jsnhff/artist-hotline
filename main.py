@@ -596,18 +596,63 @@ def convert_wav_to_mulaw(wav_data: bytes) -> bytes:
     return mulaw_data
 
 async def transcribe_audio_buffer(audio_data: bytes) -> str:
-    """Enhanced transcription with audio buffer handling"""
-    # TODO: Integrate with Deepgram WebSocket API for real-time transcription
-    # For now, simulate transcription by detecting audio presence
+    """Transcribe audio using OpenAI Whisper API"""
+    try:
+        if len(audio_data) < 1000:  # Need substantial audio
+            return ""
 
-    if len(audio_data) > 1000:  # If we have substantial audio data
-        # Placeholder - in real implementation, this would:
-        # 1. Convert μ-law to linear PCM
-        # 2. Send to Deepgram WebSocket
-        # 3. Return real-time transcription results
-        return "[User spoke - real-time transcription would go here]"
+        # Convert µ-law to WAV for Whisper API
+        import audioop
+        import wave
+        import io
+        import tempfile
 
-    return ""
+        # µ-law audio from Twilio is 8kHz, 8-bit
+        # Convert to 16-bit PCM for WAV
+        pcm_data = audioop.ulaw2lin(audio_data, 2)
+
+        # Create WAV file
+        wav_buffer = io.BytesIO()
+        with wave.open(wav_buffer, 'wb') as wav_file:
+            wav_file.setnchannels(1)  # Mono
+            wav_file.setsampwidth(2)  # 16-bit
+            wav_file.setframerate(8000)  # 8kHz
+            wav_file.writeframes(pcm_data)
+
+        wav_data = wav_buffer.getvalue()
+
+        # Save to temp file for OpenAI API (requires file upload)
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
+            temp_file.write(wav_data)
+            temp_path = temp_file.name
+
+        try:
+            # Call OpenAI Whisper API
+            from openai import OpenAI
+            client = OpenAI(api_key=config.OPENAI_API_KEY)
+
+            with open(temp_path, 'rb') as audio_file:
+                transcript = client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=audio_file,
+                    language="en"
+                )
+
+            transcription = transcript.text.strip()
+            logger.info(f"🎤 Transcription: '{transcription}'")
+            return transcription
+
+        finally:
+            # Clean up temp file
+            import os
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+
+    except Exception as e:
+        logger.error(f"Transcription error: {e}")
+        import traceback
+        logger.debug(f"Traceback: {traceback.format_exc()}")
+        return ""
 
 # Store audio buffers per stream
 audio_buffers = {}
@@ -1653,6 +1698,7 @@ async def test_websocket_debug(websocket: WebSocket):
                 websocket.call_sid = call_sid
                 websocket.audio_chunk_count = 0
                 websocket.last_response_time = 0
+                websocket.greeting_complete = False  # Initialize to prevent AttributeError
 
                 # Send greeting using ElevenLabs streaming with proper audio conversion
                 logger.info("🔊 Sending greeting via ElevenLabs streaming")
@@ -1675,16 +1721,20 @@ async def test_websocket_debug(websocket: WebSocket):
                 audio_payload = data['media']['payload']
                 audio_chunk = base64.b64decode(audio_payload)
                 
-                # Initialize counters if not present
+                # Initialize counters and audio buffer if not present
                 if not hasattr(websocket, 'audio_chunk_count'):
                     websocket.audio_chunk_count = 0
                     websocket.last_audio_time = time.time()
                     websocket.last_response_time = time.time()  # Set to now so greeting doesn't trigger silence detection
                     websocket.silence_task = None
                     websocket.greeting_complete = False
+                    websocket.audio_buffer = []  # Buffer for STT
 
                 websocket.audio_chunk_count += 1
                 websocket.last_audio_time = time.time()
+
+                # Buffer audio chunks for transcription
+                websocket.audio_buffer.append(audio_chunk)
 
                 # Mark greeting as complete after receiving substantial audio (user is speaking)
                 if websocket.audio_chunk_count > 100 and not websocket.greeting_complete:
@@ -1704,27 +1754,54 @@ async def test_websocket_debug(websocket: WebSocket):
 
                     # Create new silence detection task
                     async def check_silence():
-                        await asyncio.sleep(3.0)  # Wait 3 seconds (increased from 2)
+                        await asyncio.sleep(3.0)  # Wait 3 seconds
                         # Check if still silent
                         if time.time() - websocket.last_audio_time >= 2.9:
-                            # User stopped talking, send acknowledgment
+                            # User stopped talking, transcribe and respond
                             current_time = time.time()
-                            if current_time - websocket.last_response_time > 5:  # Increased cooldown to 5 seconds
-                                logger.info("🔇 Silence detected, sending response")
-                                responses = [
-                                    "That's interesting! Tell me more.",
-                                    "I hear you! Keep going.",
-                                    "Yeah, I'm following. What else?",
-                                    "Interesting perspective! Continue.",
-                                    "Got it. What happens next?"
-                                ]
-                                response_text = responses[websocket.audio_chunk_count % len(responses)]
+                            if current_time - websocket.last_response_time > 5:  # Cooldown
+                                logger.info("🔇 Silence detected, transcribing audio...")
+
                                 try:
-                                    await stream_speech_to_twilio(response_text, websocket, stream_sid)
-                                    websocket.last_response_time = current_time
-                                    logger.info(f"✅ Sent acknowledgment: '{response_text}'")
+                                    # Get buffered audio and transcribe
+                                    audio_data = b''.join(websocket.audio_buffer)
+                                    websocket.audio_buffer = []  # Clear buffer
+
+                                    if len(audio_data) > 1000:  # Need substantial audio
+                                        # Transcribe with Whisper
+                                        transcription = await transcribe_audio_buffer(audio_data)
+
+                                        if transcription:
+                                            # Generate intelligent response with GPT
+                                            from openai import OpenAI
+                                            client = OpenAI(api_key=config.OPENAI_API_KEY)
+
+                                            response = client.chat.completions.create(
+                                                model="gpt-4",
+                                                messages=[
+                                                    {"role": "system", "content": "You are Synthetic Jason, an AI version of artist Jason Huff. You're weird, obsessed with art, love discussing creative ideas, and have a quirky personality. Keep responses conversational and under 50 words."},
+                                                    {"role": "user", "content": transcription}
+                                                ],
+                                                max_tokens=100,
+                                                temperature=0.8
+                                            )
+
+                                            response_text = response.choices[0].message.content.strip()
+                                            logger.info(f"💬 GPT response: '{response_text}'")
+
+                                            # Stream response via ElevenLabs
+                                            await stream_speech_to_twilio(response_text, websocket, stream_sid)
+                                            websocket.last_response_time = current_time
+                                            logger.info(f"✅ Sent intelligent response")
+                                        else:
+                                            logger.warning("No transcription received, skipping response")
+                                    else:
+                                        logger.debug(f"Audio buffer too small: {len(audio_data)} bytes")
+
                                 except Exception as e:
-                                    logger.error(f"Failed to send response: {e}")
+                                    logger.error(f"Failed to generate response: {e}")
+                                    import traceback
+                                    logger.debug(f"Traceback: {traceback.format_exc()}")
 
                     websocket.silence_task = asyncio.create_task(check_silence())
             
