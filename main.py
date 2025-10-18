@@ -1694,18 +1694,26 @@ async def test_websocket_debug(websocket: WebSocket):
             elif event == 'start':
                 stream_sid = data['start']['streamSid']
                 call_sid = data['start']['callSid']
-                logger.info(f"WebSocket stream started - Stream: {stream_sid}, Call: {call_sid}")
+
+                # Get caller phone number from custom parameters
+                custom_params = data['start'].get('customParameters', {})
+                phone_number = custom_params.get('phoneNumber', 'unknown')
+
+                logger.info(f"WebSocket stream started - Stream: {stream_sid}, Call: {call_sid}, From: {phone_number}")
 
                 # Store stream info for later use
                 websocket.stream_sid = stream_sid
                 websocket.call_sid = call_sid
+                websocket.phone_number = phone_number
                 websocket.audio_chunk_count = 0
                 websocket.last_response_time = 0
                 websocket.greeting_complete = False  # Initialize to prevent AttributeError
 
-                # Send greeting using ElevenLabs streaming with proper audio conversion
-                logger.info("🔊 Sending greeting via ElevenLabs streaming")
-                greeting_message = "Hey! This is Synthetic Jason... I'm basically Jason Huff but weirder and more obsessed with art. What wild idea should we dream up together?"
+                # Generate personalized greeting based on caller history
+                from caller_memory import generate_greeting
+                greeting_message = generate_greeting(phone_number)
+                is_returning = 'back' in greeting_message.lower() or 'again' in greeting_message.lower()
+                logger.info(f"🔊 Sending {'returning caller' if is_returning else 'first-time'} greeting")
 
                 try:
                     # Use the production-ready stream_speech_to_twilio function
@@ -1810,9 +1818,18 @@ async def test_websocket_debug(websocket: WebSocket):
                                             if transcription and not is_junk:
                                                 # Initialize conversation history if needed
                                                 if not hasattr(websocket, 'conversation_history'):
+                                                    from caller_memory import get_response_style_prompt
+
+                                                    # Get dynamic response style to prevent repetitive questions
+                                                    style_instruction = get_response_style_prompt()
+
+                                                    base_prompt = "You are Synthetic Jason, an AI version of artist Jason Huff. You're weird, obsessed with art, and love discussing creative ideas. Keep responses under 30 words."
+                                                    full_prompt = f"{base_prompt} {style_instruction}"
+
                                                     websocket.conversation_history = [
-                                                        {"role": "system", "content": "You are Synthetic Jason, an AI version of artist Jason Huff. You're weird, obsessed with art, and love discussing creative ideas. Keep responses under 30 words. You already introduced yourself at the start of the call, so don't introduce yourself again - just respond naturally to what the user says."}
+                                                        {"role": "system", "content": full_prompt}
                                                     ]
+                                                    logger.info(f"🎨 Response style: {style_instruction[:50]}...")
 
                                                 # Add user message to history
                                                 websocket.conversation_history.append({"role": "user", "content": transcription})
@@ -1856,6 +1873,16 @@ async def test_websocket_debug(websocket: WebSocket):
             
             elif event == 'closed':
                 logger.info("🔍 Debug: Media stream closed")
+
+                # Save caller memory when call ends
+                if hasattr(websocket, 'phone_number') and websocket.phone_number != 'unknown':
+                    try:
+                        from caller_memory import update_caller
+                        update_caller(websocket.phone_number)
+                        logger.info(f"📝 Saved call memory for {websocket.phone_number}")
+                    except Exception as e:
+                        logger.error(f"Failed to save caller memory: {e}")
+
                 break
                 
             elif event == 'ping':
@@ -1866,6 +1893,16 @@ async def test_websocket_debug(websocket: WebSocket):
             
     except WebSocketDisconnect:
         logger.info("🔍 Debug WebSocket disconnected")
+
+        # Save caller memory on disconnect too
+        if hasattr(websocket, 'phone_number') and websocket.phone_number != 'unknown':
+            try:
+                from caller_memory import update_caller
+                update_caller(websocket.phone_number)
+                logger.info(f"📝 Saved call memory for {websocket.phone_number}")
+            except Exception as e:
+                logger.error(f"Failed to save caller memory: {e}")
+
     except Exception as e:
         logger.error(f"Debug WebSocket error: {e}")
 
