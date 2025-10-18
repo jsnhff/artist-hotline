@@ -1,4 +1,6 @@
 # Core dependencies for production
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
 python-dotenv
 twilio
 httpx
