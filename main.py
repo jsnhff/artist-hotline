@@ -1775,12 +1775,12 @@ async def test_websocket_debug(websocket: WebSocket):
                     if not is_speech and (silence_task is None or silence_task.done()):
                         # Create new silence detection task
                         async def check_silence():
-                            await asyncio.sleep(1.5)  # Wait 1.5 seconds (faster response)
+                            await asyncio.sleep(2.0)  # Wait 2 seconds (natural conversation pause)
                             # Check if still silent
                             last_audio = getattr(websocket, 'last_audio_time', time.time())
                             time_since_speech = time.time() - last_audio
                             logger.info(f"⏱️ Checking silence: {time_since_speech:.1f}s since last speech")
-                            if time_since_speech >= 1.4:
+                            if time_since_speech >= 1.9:
                                 # User stopped talking, transcribe and respond
                                 current_time = time.time()
                                 if current_time - websocket.last_response_time > 5:  # Cooldown
@@ -1796,7 +1796,15 @@ async def test_websocket_debug(websocket: WebSocket):
                                             # Transcribe with Whisper
                                             transcription = await transcribe_audio_buffer(audio_data)
 
-                                            if transcription:
+                                            # Filter out junk transcriptions (silence, noise, filler)
+                                            junk_phrases = ['. .', '..', 'you', 'thank you.', '.', ' ', 'huh', 'um', 'uh']
+                                            is_junk = (
+                                                not transcription or
+                                                transcription.strip().lower() in junk_phrases or
+                                                len(transcription.strip()) < 3
+                                            )
+
+                                            if transcription and not is_junk:
                                                 # Initialize conversation history if needed
                                                 if not hasattr(websocket, 'conversation_history'):
                                                     websocket.conversation_history = [
@@ -1832,7 +1840,7 @@ async def test_websocket_debug(websocket: WebSocket):
                                                 websocket.last_response_time = current_time
                                                 logger.info(f"✅ Sent intelligent response")
                                             else:
-                                                logger.warning("No transcription received, skipping response")
+                                                logger.info(f"🗑️ Filtered junk transcription: '{transcription}'")
                                         else:
                                             logger.debug(f"Audio buffer too small: {len(audio_data)} bytes")
 
