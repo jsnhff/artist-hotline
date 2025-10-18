@@ -1737,7 +1737,7 @@ async def test_websocket_debug(websocket: WebSocket):
                 websocket.audio_buffer.append(audio_chunk)
 
                 # Mark greeting as complete after receiving substantial audio (user is speaking)
-                if websocket.audio_chunk_count > 100 and not websocket.greeting_complete:
+                if websocket.audio_chunk_count > 100 and not getattr(websocket, 'greeting_complete', False):
                     websocket.greeting_complete = True
                     logger.info("👤 User started speaking, enabling silence detection")
 
@@ -1746,7 +1746,7 @@ async def test_websocket_debug(websocket: WebSocket):
                     logger.info(f"📥 Received {websocket.audio_chunk_count} audio chunks ({len(audio_chunk)} bytes each)")
 
                 # Only use silence detection AFTER user has started speaking (greeting is done)
-                if websocket.greeting_complete:
+                if getattr(websocket, 'greeting_complete', False):
                     # Simple silence detection: Respond after 3 seconds of silence
                     # Cancel any pending silence task
                     if websocket.silence_task and not websocket.silence_task.done():
