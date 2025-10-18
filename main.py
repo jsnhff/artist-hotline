@@ -1734,6 +1734,8 @@ async def test_websocket_debug(websocket: WebSocket):
                 websocket.last_audio_time = time.time()
 
                 # Buffer audio chunks for transcription
+                if not hasattr(websocket, 'audio_buffer'):
+                    websocket.audio_buffer = []
                 websocket.audio_buffer.append(audio_chunk)
 
                 # Mark greeting as complete after receiving substantial audio (user is speaking)
@@ -1764,7 +1766,8 @@ async def test_websocket_debug(websocket: WebSocket):
 
                                 try:
                                     # Get buffered audio and transcribe
-                                    audio_data = b''.join(websocket.audio_buffer)
+                                    audio_buffer = getattr(websocket, 'audio_buffer', [])
+                                    audio_data = b''.join(audio_buffer)
                                     websocket.audio_buffer = []  # Clear buffer
 
                                     if len(audio_data) > 1000:  # Need substantial audio
