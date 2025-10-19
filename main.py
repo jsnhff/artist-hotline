@@ -450,7 +450,15 @@ async def stream_speech_to_twilio(text: str, twilio_websocket: WebSocket, stream
             total_mp3_bytes = 0
             total_mulaw_bytes = 0
 
+            # Add timeout to prevent hanging forever
+            timeout_seconds = 30
+            start_time = time.time()
+
             async for message in elevenlabs_ws:
+                # Check timeout
+                if time.time() - start_time > timeout_seconds:
+                    logger.warning(f"ElevenLabs streaming timeout after {timeout_seconds}s, {chunk_count} chunks received")
+                    break
                 try:
                     data = json.loads(message)
                     logger.debug(f"ElevenLabs response: {list(data.keys())}")
@@ -533,6 +541,13 @@ async def stream_speech_to_twilio(text: str, twilio_websocket: WebSocket, stream
                     logger.error(f"Error processing ElevenLabs chunk: {chunk_error}")
                     import traceback
                     logger.error(f"Chunk error traceback: {traceback.format_exc()}")
+
+            # Log completion even if isFinal never arrived
+            logger.info(f"✅ ElevenLabs stream ended: {chunk_count} chunks sent")
+            if chunk_count > 0:
+                logger.info(f"   MP3 input: {total_mp3_bytes} bytes")
+                logger.info(f"   µ-law output: {total_mulaw_bytes} bytes")
+                logger.info(f"   Text: '{text[:50]}...'")
 
     except websockets.exceptions.WebSocketException as ws_error:
         logger.error(f"ElevenLabs WebSocket error: {ws_error}")
