@@ -1914,6 +1914,12 @@ async def test_websocket_debug(websocket: WebSocket):
             elif event == 'closed':
                 logger.info("🔍 Debug: Media stream closed")
 
+                # Cancel any pending silence detection task
+                if hasattr(websocket, 'silence_task') and websocket.silence_task:
+                    if not websocket.silence_task.done():
+                        websocket.silence_task.cancel()
+                        logger.info("🛑 Cancelled pending silence detection task")
+
                 # Save caller memory when call ends
                 if hasattr(websocket, 'phone_number') and websocket.phone_number != 'unknown':
                     try:
@@ -1933,6 +1939,12 @@ async def test_websocket_debug(websocket: WebSocket):
             
     except WebSocketDisconnect:
         logger.info("🔍 Debug WebSocket disconnected")
+
+        # Cancel any pending silence detection task
+        if hasattr(websocket, 'silence_task') and websocket.silence_task:
+            if not websocket.silence_task.done():
+                websocket.silence_task.cancel()
+                logger.info("🛑 Cancelled pending silence detection task on disconnect")
 
         # Save caller memory on disconnect too
         if hasattr(websocket, 'phone_number') and websocket.phone_number != 'unknown':

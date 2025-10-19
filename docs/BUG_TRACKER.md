@@ -70,9 +70,16 @@
 
 ### Bug #3: Call Hangs Up During Greeting
 **Date:** 2025-10-18
-**Cause:** Multiple issues with timing and state management (see above)
-**Fix:** In progress
-**Status:** 🔧 Fixing
+**Cause:** Multiple issues with timing and state management
+**Fix:** Added is_playing_tts flag, greeting_complete state, proper timing
+**Status:** ✅ Fixed
+
+### Bug #4: Silence Detection Fires After Disconnect (Race Condition)
+**Date:** 2025-10-19
+**Cause:** Silence detection task continues running even after user hangs up
+**Symptom:** User asks question, hangs up, system generates response to closed connection
+**Fix:** Cancel silence_task on disconnect (both 'closed' event and WebSocketDisconnect exception)
+**Status:** ✅ Fixed
 
 ---
 
