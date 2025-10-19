@@ -1719,22 +1719,25 @@ async def test_websocket_debug(websocket: WebSocket):
                     # Mark that we're playing TTS (blocks silence detection)
                     websocket.is_playing_tts = True
 
-                    # Use the production-ready stream_speech_to_twilio function
-                    # This handles ElevenLabs WebSocket + MP3 to µ-law conversion
-                    await stream_speech_to_twilio(greeting_message, websocket, stream_sid)
-                    logger.info("✅ Sent greeting to caller via ElevenLabs streaming")
+                    try:
+                        # Use the production-ready stream_speech_to_twilio function
+                        # This handles ElevenLabs WebSocket + MP3 to µ-law conversion
+                        await stream_speech_to_twilio(greeting_message, websocket, stream_sid)
+                        logger.info("✅ Sent greeting to caller via ElevenLabs streaming")
 
-                    # Mark greeting as complete and update timing
-                    websocket.greeting_complete = True
-                    websocket.last_response_time = time.time()
-                    websocket.is_playing_tts = False
-                    logger.info(f"✅ Greeting complete - ready for user input")
+                        # Mark greeting as complete and update timing
+                        websocket.greeting_complete = True
+                        websocket.last_response_time = time.time()
+                        logger.info(f"✅ Greeting complete - ready for user input")
+
+                    finally:
+                        # ALWAYS reset flag, even if TTS fails
+                        websocket.is_playing_tts = False
 
                 except Exception as e:
                     logger.error(f"ElevenLabs streaming error: {e}")
                     import traceback
                     logger.debug(f"Traceback: {traceback.format_exc()}")
-                    websocket.is_playing_tts = False
             
             elif event == 'media':
                 # Handle incoming audio from caller
@@ -1825,9 +1828,12 @@ async def test_websocket_debug(websocket: WebSocket):
                                             from caller_memory import get_filler_word
                                             filler = get_filler_word()
                                             websocket.is_playing_tts = True
-                                            await stream_speech_to_twilio(filler, websocket, stream_sid)
-                                            websocket.is_playing_tts = False
-                                            logger.info(f"🗣️ Played instant filler: '{filler}'")
+                                            try:
+                                                await stream_speech_to_twilio(filler, websocket, stream_sid)
+                                                logger.info(f"🗣️ Played instant filler: '{filler}'")
+                                            finally:
+                                                # ALWAYS reset flag, even if TTS fails
+                                                websocket.is_playing_tts = False
                                         except Exception as e:
                                             logger.error(f"Failed to play filler word: {e}")
                                             websocket.is_playing_tts = False
@@ -1895,10 +1901,13 @@ async def test_websocket_debug(websocket: WebSocket):
 
                                                 # Stream response via ElevenLabs (protected from interference)
                                                 websocket.is_playing_tts = True
-                                                await stream_speech_to_twilio(response_text, websocket, stream_sid)
-                                                websocket.is_playing_tts = False
-                                                websocket.last_response_time = time.time()
-                                                logger.info(f"✅ Sent intelligent response")
+                                                try:
+                                                    await stream_speech_to_twilio(response_text, websocket, stream_sid)
+                                                    logger.info(f"✅ Sent intelligent response")
+                                                finally:
+                                                    # ALWAYS reset flag, even if TTS fails
+                                                    websocket.is_playing_tts = False
+                                                    websocket.last_response_time = time.time()
                                             else:
                                                 logger.info(f"🗑️ Filtered junk transcription: '{transcription}'")
                                         else:
