@@ -1722,7 +1722,8 @@ async def test_websocket_debug(websocket: WebSocket):
                 websocket.phone_number = phone_number
                 websocket.audio_chunk_count = 0
                 websocket.last_response_time = 0
-                websocket.greeting_complete = False  # Initialize to prevent AttributeError
+                websocket.greeting_complete = False
+                websocket.is_playing_tts = False  # Initialize to prevent race conditions
 
                 # Generate personalized greeting based on caller history
                 from caller_memory import generate_greeting
@@ -1851,7 +1852,7 @@ async def test_websocket_debug(websocket: WebSocket):
                                                 websocket.is_playing_tts = False
                                         except Exception as e:
                                             logger.error(f"Failed to play filler word: {e}")
-                                            websocket.is_playing_tts = False
+                                            # Flag already reset in finally block
 
                                     try:
                                         # Get buffered audio and transcribe
@@ -1925,13 +1926,19 @@ async def test_websocket_debug(websocket: WebSocket):
                                                     websocket.last_response_time = time.time()
                                             else:
                                                 logger.info(f"🗑️ Filtered junk transcription: '{transcription}'")
+                                                # Update cooldown to prevent immediately detecting silence again
+                                                websocket.last_response_time = time.time()
                                         else:
                                             logger.debug(f"Audio buffer too small: {len(audio_data)} bytes")
+                                            # Update cooldown to prevent spam on small buffers
+                                            websocket.last_response_time = time.time()
 
                                     except Exception as e:
                                         logger.error(f"Failed to generate response: {e}")
                                         import traceback
                                         logger.debug(f"Traceback: {traceback.format_exc()}")
+                                        # Update cooldown even on error to prevent spam
+                                        websocket.last_response_time = time.time()
 
                         websocket.silence_task = asyncio.create_task(check_silence())
             
