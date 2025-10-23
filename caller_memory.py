@@ -109,7 +109,7 @@ def generate_greeting(phone_number: str) -> str:
 
     # First time caller
     if not caller:
-        return "Hey! This is Synthetic Jason... I'm basically Jason Huff but weirder and more obsessed with art. What wild idea should we dream up together?"
+        return "Hey! This is Synthetic Jason, an AI version of artist Jason Huff. I can talk about your art projects, creative ideas, AI art, internet culture, whatever's on your mind. Fair warning: I'm a bit slow to respond since I'm thinking things through. So what are you working on?"
 
     time_since = get_time_since_last_call(phone_number)
     call_count = caller["call_count"]
@@ -124,11 +124,18 @@ def generate_greeting(phone_number: str) -> str:
             "Hey again! What did we miss?"
         ]
     elif "minutes" in time_since:
-        greetings = [
-            f"Welcome back! It's been {time_since}. Still thinking about our chat?",
-            f"Oh hey! Back after {time_since}. What's cooking?",
-            f"Hey again! {time_since} later and here we are."
-        ]
+        # On early calls, remind about response time
+        if call_count <= 2:
+            greetings = [
+                f"Welcome back! It's been {time_since}. Remember I'm slow to respond but I'm thinking. What's on your mind?",
+                f"Oh hey! Back after {time_since}. Still takes me a bit to respond, but I'm here. What are you working on?",
+            ]
+        else:
+            greetings = [
+                f"Welcome back! It's been {time_since}. Still thinking about our chat?",
+                f"Oh hey! Back after {time_since}. What's cooking?",
+                f"Hey again! {time_since} later and here we are."
+            ]
     elif "hours" in time_since:
         greetings = [
             f"Hey! It's been {time_since}. Back for more creative chaos?",
