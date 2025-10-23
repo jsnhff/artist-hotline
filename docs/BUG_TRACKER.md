@@ -81,6 +81,83 @@
 **Fix:** Cancel silence_task on disconnect (both 'closed' event and WebSocketDisconnect exception)
 **Status:** ✅ Fixed
 
+### Bug #5: is_playing_tts Flag Gets Stuck Forever (Critical Deadlock)
+**Date:** 2025-10-19
+**Cause:** `stream_speech_to_twilio()` hangs or fails, never resets `is_playing_tts = False`
+**Symptom:**
+- Intro plays fine
+- Filler word plays ("Right", "Totally")
+- User speaks
+- NOTHING HAPPENS - silence forever
+- Logs show: "⏸️ Skipping silence detection - AI is speaking" for 20+ seconds
+- All future silence detection permanently blocked
+
+**Log Evidence:**
+```
+04:15:22 - Starting ElevenLabs streaming for: 'Totally....'
+04:15:29 - ⏸️ Skipping silence detection - AI is speaking (6s after!)
+04:15:45 - ⏸️ Skipping silence detection - AI is speaking (22s after!)
+NO "✅ Finished streaming" log - TTS never completed!
+```
+
+**Root Cause:** TTS function set flag to True but never reset to False
+```python
+websocket.is_playing_tts = True
+await stream_speech_to_twilio(text, websocket, stream_sid)  # ← Hangs here!
+websocket.is_playing_tts = False  # ← Never reached!
+```
+
+**Fix:** Use try/finally blocks for ALL TTS operations
+```python
+websocket.is_playing_tts = True
+try:
+    await stream_speech_to_twilio(text, websocket, stream_sid)
+finally:
+    websocket.is_playing_tts = False  # ← ALWAYS runs, even if TTS fails!
+```
+
+**Impact:** Critical - Made entire call system unresponsive
+**Status:** ✅ Fixed
+
+### Bug #6: ElevenLabs Streaming Hangs Forever (No Response Audio)
+**Date:** 2025-10-19
+**Cause:** `stream_speech_to_twilio()` waits for `isFinal` from ElevenLabs that never arrives
+**Symptom:**
+- User speaks ✅
+- Filler word plays ("Okay", "Hmm") ✅
+- GPT generates response ✅
+- ElevenLabs starts streaming... ❌ NEVER FINISHES
+- User hears nothing
+- Silence detection fires again → more filler words
+- Cycle repeats forever
+
+**Log Evidence:**
+```
+04:18:50 - 🎤 Transcription: "I'm just seeing if you work."
+04:18:51 - 💬 GPT response: "Your curiosity is a spark for creativity..."
+04:18:51 - Starting ElevenLabs streaming...
+(NO "Finished streaming" log)
+
+But filler words complete fine:
+04:18:47 - Starting ElevenLabs streaming: 'Okay....'
+04:18:47 - ✅ Finished streaming: 2 chunks
+```
+
+**Root Cause:**
+- For longer text, ElevenLabs doesn't send `isFinal` flag
+- `async for message in elevenlabs_ws:` loop waits forever
+- Short text (filler words) work because ElevenLabs sends `isFinal` quickly
+- Longer GPT responses hang indefinitely
+
+**Fix:**
+1. Added 30-second timeout to streaming loop
+2. Log completion even if `isFinal` never arrives
+3. Function returns after timeout or natural completion
+4. At least plays partial audio instead of hanging forever
+
+**Impact:** Critical - Users never heard actual GPT responses, only filler words
+**Status:** ✅ Fixed
+
 ---
 
 ## Testing Checklist (Before Deploying)
