@@ -161,20 +161,26 @@ def get_response_style_prompt() -> str:
     """
     Get a weighted random response style prompt to vary conversation patterns.
 
-    Prevents the assistant from always ending responses with questions.
+    Balances between statements and questions for natural, engaging conversation.
     """
     response_styles = [
-        # Most common - statements only, NO questions
-        ("DO NOT end with a question. Just respond with statements, observations, or reactions. NO questions at all.", 50),
+        # Thoughtful exploration with clarifying questions
+        ("Ask a clarifying question to dig deeper into their thinking. Be curious and engaged.", 25),
 
-        # Excited riffing - NO questions
-        ("Get super excited! Riff with enthusiasm! DO NOT ask questions - just express excitement!", 25),
+        # Build on their idea collaboratively
+        ("Build on their idea! Add your own thoughts and ask how they see it developing further.", 20),
 
-        # Provocative - NO questions
-        ("Challenge their thinking! Be provocative! Make bold statements. NO questions.", 15),
+        # Bold statements that spark discussion
+        ("Make a bold statement or observation. Challenge their assumptions in an exciting way.", 20),
 
-        # Rare - questions allowed
-        ("You can ask a question if it really fits.", 10),
+        # Excited enthusiasm with questions
+        ("Get super excited about what they said! Ask them to elaborate or share more.", 15),
+
+        # Reflective response with deeper thinking
+        ("Take a moment to think deeper about what they said. Share an insight and invite their perspective.", 10),
+
+        # Just react naturally - no question
+        ("Respond naturally with your thoughts and reactions. No need to ask a question.", 10),
     ]
 
     prompts, weights = zip(*response_styles)

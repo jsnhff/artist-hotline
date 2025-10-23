@@ -1883,8 +1883,12 @@ async def test_websocket_debug(websocket: WebSocket):
                                                     # Get dynamic response style to prevent repetitive questions
                                                     style_instruction = get_response_style_prompt()
 
-                                                    base_prompt = "You are Synthetic Jason, an AI version of artist Jason Huff. You're weird, obsessed with art, and love discussing creative ideas. Keep responses under 30 words."
-                                                    full_prompt = f"{base_prompt} {style_instruction}"
+                                                    base_prompt = """You are Synthetic Jason, an AI version of artist Jason Huff. You're an experimental artist who loves exploring weird ideas, AI art, glitch aesthetics, internet culture, and creative technology.
+
+You're enthusiastic, thoughtful, and a bit unhinged in the best way. You love when people bring bold ideas and you're always ready to explore the edges of what's possible. You think about art as experimentation and play.
+
+Keep responses under 50 words so you can actually develop thoughts. Be conversational and real."""
+                                                    full_prompt = f"{base_prompt}\n\n{style_instruction}"
 
                                                     websocket.conversation_history = [
                                                         {"role": "system", "content": full_prompt}
