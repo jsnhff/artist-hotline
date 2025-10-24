@@ -517,7 +517,7 @@ async def stream_speech_to_twilio(text: str, twilio_websocket: WebSocket, stream
                                 await twilio_websocket.send_text(json.dumps(media_message))
                                 logger.debug(f"✅ Sent converted audio chunk {chunk_count} to Twilio")
                                 # Small delay to prevent overwhelming the connection
-                                await asyncio.sleep(0.02)  # 20ms delay between chunks
+                                await asyncio.sleep(0.01)  # 10ms delay for faster streaming (was 20ms)
                             else:
                                 logger.warning(f"Twilio WebSocket not connected (state: {twilio_websocket.client_state.name}), skipping chunk")
                                 # Don't break - try to continue in case connection recovers
@@ -653,10 +653,13 @@ async def transcribe_audio_buffer(audio_data: bytes) -> str:
                 transcript = client.audio.transcriptions.create(
                     model="whisper-1",
                     file=audio_file,
-                    language="en"
+                    language="en",
+                    prompt="Conversation about art, creative projects, AI, technology. Common words: generative, glitch, aesthetic, algorithm, neural network, synthetic.",
+                    response_format="text"
                 )
 
-            transcription = transcript.text.strip()
+            # With response_format="text", transcript is a string directly
+            transcription = transcript.strip() if isinstance(transcript, str) else transcript.text.strip()
             logger.info(f"🎤 Transcription: '{transcription}'")
             return transcription
 
@@ -1634,7 +1637,7 @@ async def test_websocket_debug(websocket: WebSocket):
                             }
                             await websocket.send_text(json.dumps(response))
                             chunk_count += 1
-                            await asyncio.sleep(0.02)  # 20ms delay
+                            await asyncio.sleep(0.01)  # 10ms delay for faster streaming (was 20ms)
                         
                         await websocket.send_text(json.dumps({
                             "event": "debug_audio_complete",
@@ -1777,7 +1780,7 @@ async def test_websocket_debug(websocket: WebSocket):
                 import audioop
                 rms = audioop.rms(audio_chunk, 1)  # Root mean square for µ-law (1 byte per sample)
                 # Threshold: Background noise is ~30-60 RMS, actual speech is 100+ RMS
-                is_speech = rms > 80  # Raised threshold to filter out phone line noise
+                is_speech = rms > 70  # Lowered for faster speech detection (was 80)
 
                 # Log RMS values to calibrate threshold
                 if websocket.audio_chunk_count % 100 == 0:
@@ -1815,12 +1818,12 @@ async def test_websocket_debug(websocket: WebSocket):
                     if not is_speech and (silence_task is None or silence_task.done()):
                         # Create new silence detection task
                         async def check_silence():
-                            await asyncio.sleep(2.0)  # Wait 2 seconds (natural conversation pause)
+                            await asyncio.sleep(1.5)  # Reduced for faster response (was 2.0s)
                             # Check if still silent
                             last_audio = getattr(websocket, 'last_audio_time', time.time())
                             time_since_speech = time.time() - last_audio
                             logger.info(f"⏱️ Checking silence: {time_since_speech:.1f}s since last speech")
-                            if time_since_speech >= 1.9:
+                            if time_since_speech >= 1.4:  # Reduced from 1.9s
                                 # User stopped talking, transcribe and respond
                                 current_time = time.time()
 
@@ -1906,14 +1909,22 @@ Keep responses under 50 words so you can actually develop thoughts. Be conversat
                                                 from openai import OpenAI
                                                 client = OpenAI(api_key=config.OPENAI_API_KEY)
 
-                                                response = client.chat.completions.create(
+                                                # Enable streaming for faster first token
+                                                stream = client.chat.completions.create(
                                                     model="gpt-4o-mini",  # 10x faster and cheaper than gpt-4
                                                     messages=websocket.conversation_history,
                                                     max_tokens=60,  # Shorter for faster responses
-                                                    temperature=0.9
+                                                    temperature=0.9,
+                                                    stream=True  # Stream for lower latency
                                                 )
 
-                                                response_text = response.choices[0].message.content.strip()
+                                                # Collect response chunks
+                                                response_chunks = []
+                                                for chunk in stream:
+                                                    if chunk.choices[0].delta.content:
+                                                        response_chunks.append(chunk.choices[0].delta.content)
+
+                                                response_text = ''.join(response_chunks).strip()
                                                 logger.info(f"💬 GPT response: '{response_text}'")
 
                                                 # Add assistant response to history
