@@ -11,10 +11,74 @@ import asyncio
 import json
 import base64
 import logging
+import time
 import websockets
 from fastapi import WebSocket
 
 logger = logging.getLogger(__name__)
+
+# Latency tracking
+class LatencyTracker:
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.call_start = None
+        self.first_audio_received = None
+        self.speech_start = None
+        self.speech_end = None
+        self.response_start = None
+        self.response_first_audio = None
+        self.last_speech_end = None
+        self.response_times = []
+
+    def log_timing(self, event: str):
+        """Log timing event with millisecond precision"""
+        now = time.time()
+
+        if event == "call_start":
+            self.call_start = now
+            logger.info("⏱️  [LATENCY] Call started")
+
+        elif event == "first_audio":
+            if self.call_start and not self.first_audio_received:
+                self.first_audio_received = now
+                elapsed = (now - self.call_start) * 1000
+                logger.info(f"⏱️  [LATENCY] First audio received: {elapsed:.0f}ms from call start")
+
+        elif event == "speech_start":
+            self.speech_start = now
+            logger.info("⏱️  [LATENCY] User started speaking")
+
+        elif event == "speech_end":
+            if self.speech_start:
+                self.speech_end = now
+                self.last_speech_end = now
+                duration = (now - self.speech_start) * 1000
+                logger.info(f"⏱️  [LATENCY] User stopped speaking (spoke for {duration:.0f}ms)")
+                self.speech_start = None  # Reset for next utterance
+
+        elif event == "response_start":
+            self.response_start = now
+            if self.last_speech_end:
+                think_time = (now - self.last_speech_end) * 1000
+                logger.info(f"⏱️  [LATENCY] AI started responding: {think_time:.0f}ms after user stopped")
+
+        elif event == "response_first_audio":
+            if self.last_speech_end:
+                self.response_first_audio = now
+                latency = (now - self.last_speech_end) * 1000
+                self.response_times.append(latency)
+                avg_latency = sum(self.response_times) / len(self.response_times)
+                logger.info(f"⏱️  [LATENCY] First audio chunk received: {latency:.0f}ms | Avg: {avg_latency:.0f}ms | Count: {len(self.response_times)}")
+
+    def summary(self):
+        """Print latency summary"""
+        if self.response_times:
+            avg = sum(self.response_times) / len(self.response_times)
+            min_time = min(self.response_times)
+            max_time = max(self.response_times)
+            logger.info(f"⏱️  [LATENCY SUMMARY] Responses: {len(self.response_times)} | Avg: {avg:.0f}ms | Min: {min_time:.0f}ms | Max: {max_time:.0f}ms")
 
 # OpenAI Realtime API WebSocket URL
 OPENAI_REALTIME_URL = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01"
@@ -34,6 +98,10 @@ async def handle_realtime_api_call(twilio_ws: WebSocket, stream_sid: str, openai
 
     All in one integrated pipeline with ~500ms latency!
     """
+
+    # Initialize latency tracker
+    latency_tracker = LatencyTracker()
+    latency_tracker.log_timing("call_start")
 
     try:
         # Connect to OpenAI Realtime API
@@ -63,6 +131,11 @@ async def handle_realtime_api_call(twilio_ws: WebSocket, stream_sid: str, openai
 
                         if data.get('event') == 'media':
                             chunk_count += 1
+
+                            # Track first audio received
+                            if chunk_count == 1:
+                                latency_tracker.log_timing("first_audio")
+
                             if chunk_count % 100 == 0:
                                 logger.info(f"📤 Sent {chunk_count} audio chunks to OpenAI")
                             # Convert µ-law to PCM16 for OpenAI
@@ -100,6 +173,7 @@ async def handle_realtime_api_call(twilio_ws: WebSocket, stream_sid: str, openai
                 """Forward audio responses from OpenAI back to Twilio"""
                 try:
                     response_count = 0
+                    first_response_audio = True
                     async for message in openai_ws:
                         response = json.loads(message)
 
@@ -108,9 +182,23 @@ async def handle_realtime_api_call(twilio_ws: WebSocket, stream_sid: str, openai
                         if event_type not in ['response.audio.delta', 'input_audio_buffer.speech_started', 'input_audio_buffer.speech_stopped']:
                             logger.info(f"📥 OpenAI event: {event_type}")
 
+                        # Track speech start/end for latency measurement
+                        if event_type == 'input_audio_buffer.speech_started':
+                            latency_tracker.log_timing("speech_start")
+                        elif event_type == 'input_audio_buffer.speech_stopped':
+                            latency_tracker.log_timing("speech_end")
+                        elif event_type == 'response.created':
+                            latency_tracker.log_timing("response_start")
+
                         # Handle different event types
                         if response.get('type') == 'response.audio.delta':
                             response_count += 1
+
+                            # Track first audio response
+                            if first_response_audio:
+                                latency_tracker.log_timing("response_first_audio")
+                                first_response_audio = False
+
                             if response_count % 10 == 0:
                                 logger.info(f"📥 Received {response_count} audio responses from OpenAI")
                             # OpenAI is sending PCM16 24kHz audio data
@@ -146,6 +234,8 @@ async def handle_realtime_api_call(twilio_ws: WebSocket, stream_sid: str, openai
                             # Log what the AI said
                             transcript = response.get('transcript', '')
                             logger.info(f"🤖 AI said: {transcript}")
+                            # Reset for next response
+                            first_response_audio = True
 
                         elif response.get('type') == 'conversation.item.input_audio_transcription.completed':
                             # Log what the user said
@@ -165,8 +255,12 @@ async def handle_realtime_api_call(twilio_ws: WebSocket, stream_sid: str, openai
                 stream_openai_to_twilio()
             )
 
+            # Print latency summary at end of call
+            latency_tracker.summary()
+
     except Exception as e:
         logger.error(f"Realtime API error: {e}")
+        latency_tracker.summary()
         raise
 
 
