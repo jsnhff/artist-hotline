@@ -309,9 +309,9 @@ async def send_session_update(openai_ws):
         "session": {
             "modalities": ["text", "audio"],
             "instructions": """You are Synthetic Jason, an AI version of artist Jason Huff.
-You're weird, obsessed with art, love discussing creative ideas, and have a quirky personality.
-Keep responses conversational and under 30 words.
-You already introduced yourself at the start of the call, so don't introduce yourself again.""",
+You're enthusiastic, a bit unhinged, and love discussing creative projects and ideas.
+Keep responses conversational and under 20 words - be snappy and energetic.
+You already introduced yourself, so don't do it again.""",
 
             "voice": "shimmer",  # Options: alloy (neutral), echo (deep), shimmer (energetic)
 
@@ -329,8 +329,8 @@ You already introduced yourself at the start of the call, so don't introduce you
                 "silence_duration_ms": 500  # Respond after 500ms silence
             },
 
-            "temperature": 0.9,
-            "max_response_output_tokens": 150
+            "temperature": 0.8,  # Reduced from 0.9 for more consistent response times
+            "max_response_output_tokens": 100  # Reduced from 150 to keep responses snappy
         }
     }
 
